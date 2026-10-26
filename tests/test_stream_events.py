@@ -157,6 +157,10 @@ check("a 400 whose body holds 429 digits is not a rate limit", "요청 한도" n
 said = session._explain(ModelHTTPError(400, "m", {"error": {"message": "key 401 chars"}}))
 check("nor an auth failure", "인증" not in said, said)
 check("a plain text 429 still maps", "요청 한도" in session._explain(RuntimeError("HTTP 429 Too Many Requests")))
+check("a 429 says how to go on", "계속 이어서" in session._explain(ModelHTTPError(429, "m", None)))
+said = session._explain(RuntimeError("Exceeded the max_tokens limit"))
+check("an output-limit stop says how to go on, first", "계속 이어서" in said
+      and said.index("계속 이어서") < said.index("최대 출력 토큰"), said)
 config.load()["agent"]["baseUrl"] = ""
 
 print()

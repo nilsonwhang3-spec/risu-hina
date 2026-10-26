@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-24 (v0.15.52, Risu Hina)
+# 06. Implementation status — as of 2026-10-26 (v0.15.53, Risu Hina)
+
+## 0.15.53 (2026-10-26): §1-120 검수 keeps its grid during a batch; §1-121 a lost AI turn shows its own error, 429 by status, reports keep the error line
 
 ## 0.15.52 (2026-10-24): §1-119 an AI turn survives its connection (RisuAI desktop 240s cap); the panel reattaches
 
@@ -40,6 +42,7 @@
   smaller requests. (3) `GET /chat/outcome` (`session.turn_outcome`: running / done / error / unknown from the
   buffered turn); after the last reattach fails the panel asks it and shows the turn's own error with the break
   named, instead of a bare `network error`.
+- (4) The output-token-limit and 429 messages now say first that the work so far is kept and '계속 이어서 해주세요' continues it (the reporter recovered exactly that way); the token one no longer says "32000 이상" to someone already at 32000.
 - Root cause of report (2)'s simultaneous break is still unknown (needs the info lines (1) now carries).
 - Tests: `test_stream_events.py` (outcome states, explain by status), `tests/agent_stream_outcome.mjs`. Gate.
 

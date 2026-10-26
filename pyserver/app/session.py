@@ -896,10 +896,16 @@ def _explain(e: Exception) -> str:
         return f"{raw[:400]}\n→ {fix}"
 
     if "token limit" in text.lower() or "max_tokens" in text.lower():
+        # The turn's prompt and text so far are kept (_save_partial_history),
+        # so "계속" picks up where it stopped - say that first: raising the
+        # limit only helps the NEXT call, and "32000 이상" read as nonsense
+        # to someone already at 32000.
         return (
             f"모델이 출력 토큰 한도({limit})를 답을 내기 전에 다 썼습니다. "
-            "사고(reasoning) 모델은 생각한 토큰도 출력으로 계산합니다 — "
-            "설정 탭 → AI 에이전트에서 '최대 출력 토큰'을 32000 이상으로 올려 주세요."
+            "여기까지 한 작업은 대화에 남아 있으니 '계속 이어서 해주세요'라고 보내면 이어서 진행합니다.\n"
+            "자주 반복되면: 사고(reasoning) 모델은 생각한 토큰도 출력으로 계산합니다 — "
+            "설정 탭 → AI 에이전트에서 '최대 출력 토큰'을 지금보다 높게 올리거나, "
+            "큰 파일은 여러 번에 나눠 쓰도록 요청해 주세요."
         )
     low = text.lower()
     if (config.section("agent").get("provider") or "") == "codex":
@@ -950,7 +956,8 @@ def _explain_429(body: Any) -> str:
     the same session failed again 14 minutes later in the report that led
     here, so "try again shortly" alone sends people round in a circle."""
     said = _provider_message(body)
-    out = "모델 쪽에서 요청 한도에 걸렸습니다 (자동 재시도 후에도 실패)."
+    out = ("모델 쪽에서 요청 한도에 걸렸습니다 (자동 재시도 후에도 실패). "
+           "여기까지 한 작업은 대화에 남아 있으니 1~2분 뒤 '계속 이어서 해주세요'라고 보내면 이어서 진행합니다.")
     if said:
         out += f"\n제공자 응답: {said[:300]}"
     base = (config.section("agent").get("baseUrl") or "").lower()
