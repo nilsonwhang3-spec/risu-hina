@@ -126,6 +126,39 @@ check("attach replays what came after the last line read", "text" in rtypes and 
       and "start" not in rtypes, str(rtypes))
 check("a finished turn is forgotten after its grace", dropped)
 
+print("\ntest_turn_outcome")
+# Every reattach failed: the panel asks how the turn ended (GET /chat/outcome)
+# instead of showing a bare "network error" over the turn's own error.
+check("no turn is unknown", session.turn_outcome("nope") == {"state": "unknown"})
+t = session._Turn()
+session._TURNS["oc"] = t
+t.lines.append(session._line({"type": "start"}))
+check("an unfinished turn is running", session.turn_outcome("oc") == {"state": "running"})
+t.lines.append(session._line({"type": "error", "error": "모델 쪽에서 요청 한도"}))
+t.done = True
+check("an errored turn returns its error",
+      session.turn_outcome("oc") == {"state": "error", "error": "모델 쪽에서 요청 한도"}, str(session.turn_outcome("oc")))
+t.lines[-1] = session._line({"type": "done"})
+check("a finished turn is done", session.turn_outcome("oc") == {"state": "done"})
+session._TURNS.pop("oc", None)
+
+print("\ntest_explain_by_status")
+from pydantic_ai.exceptions import ModelHTTPError  # noqa: E402
+
+vertex = [{"error": {"code": 429, "message": "Resource exhausted. Please try again later.",
+                     "status": "RESOURCE_EXHAUSTED"}}]
+config.load().setdefault("agent", {})["baseUrl"] = "https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi"
+said = session._explain(ModelHTTPError(429, "google/gemini-x", vertex))
+check("a 429 says rate limit", "요청 한도" in said, said)
+check("and quotes the provider's sentence", "Resource exhausted" in said, said)
+check("and on Vertex points at the quota", "Vertex 할당량" in said, said)
+said = session._explain(ModelHTTPError(400, "m", {"error": {"message": "input token count 1429000 exceeds the limit"}}))
+check("a 400 whose body holds 429 digits is not a rate limit", "요청 한도" not in said, said)
+said = session._explain(ModelHTTPError(400, "m", {"error": {"message": "key 401 chars"}}))
+check("nor an auth failure", "인증" not in said, said)
+check("a plain text 429 still maps", "요청 한도" in session._explain(RuntimeError("HTTP 429 Too Many Requests")))
+config.load()["agent"]["baseUrl"] = ""
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

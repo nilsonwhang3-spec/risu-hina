@@ -781,6 +781,28 @@ def turn_for(session_id: str) -> _Turn | None:
     return _TURNS.get(session_id)
 
 
+def turn_outcome(session_id: str) -> dict:
+    """How the turn ended, for a panel whose stream AND reattaches all failed:
+    the error the turn wrote is worth more than the panel's "network error"
+    (the 19:38 report: Vertex failed, the panel only saw the broken stream).
+    A plain JSON GET, so it can succeed where a streamed fetch did not."""
+    turn = _TURNS.get(session_id)
+    if turn is None:
+        return {"state": "unknown"}
+    if not turn.done:
+        return {"state": "running"}
+    for line in reversed(turn.lines):
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "error":
+            return {"state": "error", "error": str(ev.get("error") or "")}
+        if ev.get("type") == "done":
+            return {"state": "done"}
+    return {"state": "unknown"}
+
+
 async def follow(turn: _Turn, after: int = 0) -> AsyncGenerator[str, None]:
     """Yield the turn's lines from index `after` on, waiting for new ones until
     the turn ends. A client that goes away only stops this generator; the
@@ -885,10 +907,15 @@ def _explain(e: Exception) -> str:
         said = codexauth.explain(text)
         if said:
             return said
-    if "401" in text or "unauthorized" in low or "api key" in low:
+    # The HTTP status when the library kept one (ModelHTTPError). A digit
+    # search in the text matched token counts in a 400's body ("1429000").
+    status = getattr(e, "status_code", None)
+    if not isinstance(status, int):
+        status = None
+    if status == 401 or (status is None and "401" in text) or "unauthorized" in low or "api key" in low:
         return "모델 API 인증에 실패했습니다. 설정 탭에서 API Key를 확인해 주세요."
-    if "429" in text or "rate limit" in low:
-        return "모델 쪽에서 요청 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요."
+    if status == 429 or (status is None and "429" in text) or "rate limit" in low or "resource_exhausted" in low:
+        return _explain_429(getattr(e, "body", None))
     if "timeout" in low or "timed out" in low:
         return "모델 응답이 시간 안에 오지 않았습니다. 지시를 짧게 나눠 주시거나 다시 시도해 주세요."
     # httpx's RemoteProtocolError: the peer closed mid-body (an idle keep-alive
@@ -901,6 +928,39 @@ def _explain(e: Exception) -> str:
     if "not found" in low and "model" in low:
         return "설정된 모델 이름을 찾지 못했습니다. 설정 탭에서 모델명을 확인해 주세요."
     return raw
+
+
+def _provider_message(body: Any) -> str:
+    """The provider's own sentence from an error body: OpenAI-style
+    {"error": {"message"}}, Vertex's list of those, or a bare {"message"}."""
+    if isinstance(body, list) and body:
+        body = body[0]
+    if isinstance(body, dict):
+        inner = body.get("error")
+        if isinstance(inner, dict):
+            body = inner
+        msg = body.get("message")
+        if isinstance(msg, str):
+            return msg.strip()
+    return ""
+
+
+def _explain_429(body: Any) -> str:
+    """429 after the SDK's own retries. On Vertex it is a quota, not a burst:
+    the same session failed again 14 minutes later in the report that led
+    here, so "try again shortly" alone sends people round in a circle."""
+    said = _provider_message(body)
+    out = "모델 쪽에서 요청 한도에 걸렸습니다 (자동 재시도 후에도 실패)."
+    if said:
+        out += f"\n제공자 응답: {said[:300]}"
+    base = (config.section("agent").get("baseUrl") or "").lower()
+    if "aiplatform.googleapis.com" in base:
+        out += ("\n→ Vertex 할당량(분당 입력 토큰·프리뷰 모델 공유 할당량) 문제일 가능성이 큽니다. "
+                "몇 분 뒤에도 반복되면 새 대화로 요청당 입력을 줄이거나(⚙ → 에이전트 → 자동 요약 기준), "
+                "GCP 콘솔의 Vertex AI 할당량을 확인해 주세요.")
+    else:
+        out += " 잠시 후 다시 시도해 주세요. 계속되면 새 대화로 요청당 입력을 줄여 보세요."
+    return out
 
 
 # How often a tool call still being written reports its size (§1-103).

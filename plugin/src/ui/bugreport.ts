@@ -166,22 +166,58 @@ export async function buildReport(trigger = ''): Promise<string> {
     for (const r of others.slice(-6)) lines.push(`- ${clock(r.at)} ${r.text}`);
   }
 
+  let entries: string[][] = [];
   if (diag) {
     try {
-      const r = await state.logs(40, 'warn');
-      // 404s from probes and the like are noise in a comment; keep the rest.
-      const kept = r.lines.filter((l) => !/->\s*404\b/.test(l)).slice(-15);
-      if (kept.length) {
-        lines.push('', '서버 로그 (warn 이상, 최근):');
-        for (const l of kept) lines.push(l.length > 240 ? l.slice(0, 240) + '…' : l);
-      }
+      const r = await state.logs(300, 'info');
+      // warn and up, plus the info lines that tell a lost stream's story;
+      // 404s from probes and the like are noise in a comment.
+      const kept = r.lines.filter((l) => !/->\s*404\b/.test(l) && (logLevel(l) !== 'info' || STREAM_INFO.test(l))).slice(-15);
+      entries = kept.map(logEntry);
     } catch { lines.push('', '(서버 로그를 읽지 못했습니다)'); }
   }
+  return fitReport(lines, entries);
+}
 
-  let text = mask(lines.join('\n'));
-  // A comment box, not a file: the oldest log lines go first if it runs long.
-  if (text.length > 3500) text = text.slice(0, 3500) + '\n…(길어서 잘랐습니다)';
+/** A comment box, not a file: past 3500 chars the OLDEST log entries go
+ * first - the newest is the failure being reported (a plain slice of the
+ * whole block used to cut that one). */
+export function fitReport(head: string[], entries: string[][], max = 3500): string {
+  const build = (from: number) => {
+    const tail = entries.slice(from);
+    const out = head.slice();
+    if (tail.length) {
+      out.push('', '서버 로그 (warn 이상 + 스트림 재접속, 최근):');
+      if (from > 0) out.push(`…(오래된 ${from}줄 생략)`);
+      for (const e of tail) out.push(...e);
+    }
+    return mask(out.join('\n'));
+  };
+  let from = 0;
+  let text = build(from);
+  while (text.length > max && from < entries.length) text = build(++from);
+  if (text.length > max) text = text.slice(0, max) + '\n…(길어서 잘랐습니다)';
   return text;
+}
+
+// Info lines a report about a dropped AI turn needs (§1-119 reattach).
+const STREAM_INFO = /agent stream (reattach|outcome)|POST \/chat\/attach|agent turn cut off/;
+
+/** The level column of a backend log line: "[YYYY-MM-DD HH:MM:SS] level ...". */
+function logLevel(line: string): string {
+  return line.slice(22, 27).trim().toLowerCase();
+}
+
+/** One log entry as report lines. A traceback is one multi-line entry whose
+ * LAST line names the error (ModelHTTPError: status_code: 429, body ...); a
+ * flat 240-char cut kept only "Traceback (most recent call last)" and lost
+ * it, in both Vertex reports that led here. */
+export function logEntry(entry: string): string[] {
+  const rows = entry.split('\n').map((s) => s.trimEnd()).filter(Boolean);
+  const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
+  if (rows.length < 2) return [cut(entry, 240)];
+  const last = rows[rows.length - 1];
+  return [cut(rows[0], 240), '  … ' + cut(last.trim(), 600)];
 }
 
 /** Home-folder names and absolute paths out: a community comment is public. */

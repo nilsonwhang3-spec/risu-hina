@@ -1349,6 +1349,14 @@ def h_agent_stop(arg: dict) -> dict:
     return session.stop(sid)
 
 
+def h_chat_outcome(arg: dict) -> dict:
+    """The end of a turn the panel lost the stream of (session.turn_outcome)."""
+    sid = str(arg.get("sessionId") or "")
+    if not sid:
+        raise ApiError(400, "sessionId 가 필요합니다")
+    return session.turn_outcome(sid)
+
+
 def h_studio_job_cancel(arg: dict) -> dict:
     job_id = str(arg.get("id") or "")
     if not studiojob.cancel(job_id):
@@ -2965,6 +2973,7 @@ ROUTES: dict[str, Handler] = {
     "GET /studio/job/preview": h_studio_job_preview,
     "POST /studio/job/cancel": h_studio_job_cancel,
     "POST /agent/stop": h_agent_stop,
+    "GET /chat/outcome": h_chat_outcome,
     "GET /agent/usage": h_agent_usage,
     "GET /agent/notes": h_agent_notes,
     "GET /agent/learning": h_agent_learning,

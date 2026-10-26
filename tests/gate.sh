@@ -96,6 +96,7 @@ if [ -d plugin/node_modules ]; then
   run "planning and mobile proposal UI" node tests/agent_planning_ui.mjs
   run "manual skill sync UI" node tests/skills_sync_ui.mjs
   run "bot context switching" node tests/bot_context.mjs
+  run "lost AI turn outcome + report log entries" node tests/agent_stream_outcome.mjs
   run "asset upload concurrency" node tests/asset_concurrency.mjs
   run "plugin build"     node plugin/build.config.mjs
   run "plugin smoke (real DOM + real backend)" node tests/plugin_smoke.mjs

@@ -2356,7 +2356,15 @@ class AppState {
         // 404 from attach: the turn is gone (or an older backend has no
         // attach) - the break that sent us here is the error worth showing.
         if (e instanceof BackendError && path === '/chat/attach' && e.status === 404) throw cause ?? e;
-        if (signal?.aborted || ended || read === 0 || retries >= ATTACH_RETRIES) throw e;
+        if (signal?.aborted || ended || read === 0) throw e;
+        if (retries >= ATTACH_RETRIES) {
+          // Every reattach failed: ask how the turn ended over a plain GET
+          // before showing a bare "network error" - the turn's own error
+          // (a model quota, a timeout) is the one worth reading.
+          const ev = await this.turnOutcome(sessionId, e);
+          if (ev) { yield ev; return; }
+          throw e;
+        }
         cause ??= e;
         retries++;
         await new Promise((r) => setTimeout(r, Math.min(1000 * retries, 5000)));
@@ -2366,6 +2374,21 @@ class AppState {
         body = { sessionId, after: read };
       }
     }
+  }
+
+  /** What a lost turn came to, as an 'error' event for the agent view, or
+   * null when the backend cannot say either (then the break itself shows). */
+  private async turnOutcome(sessionId: string, broke: unknown): Promise<{ type: 'error'; error: string } | null> {
+    let r: { state?: string; error?: string };
+    try {
+      r = await transport.get('/chat/outcome', { sessionId }, 10_000);
+    } catch { return null; }
+    void clientLog('info', 'agent stream outcome', { state: r.state, error: String(broke) });
+    const lost = `백엔드와의 스트림 연결이 끊겼습니다 (${broke instanceof Error ? broke.message : String(broke)}).`;
+    if (r.state === 'error') return { type: 'error', error: `${r.error || '알 수 없는 오류'}\n(${lost} 서버에 확인한 이 턴의 결과입니다.)` };
+    if (r.state === 'done') return { type: 'error', error: `${lost} 턴 자체는 서버에서 끝났고 결과는 대화 기록에 저장되었습니다. 대화를 다시 열면 보입니다.` };
+    if (r.state === 'running') return { type: 'error', error: `${lost} 턴은 서버에서 계속 진행 중이며, 끝나면 대화 기록에 저장됩니다. 잠시 뒤 대화를 다시 열어 주세요.` };
+    return null;
   }
 
   /** 중단 as a request the backend hears at once (§1-44): the aborted fetch

@@ -24,6 +24,25 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-121 (2026-10-26): a lost turn shows its own error; 429 by status; reports keep the error line
+
+- **Field reports (오류 제보, Vertex gemini-4-argon, desktop):** (1) "모델 쪽에서 요청 한도" at 12:22 and again 12:36
+  in one session - not a burst, and "잠시 후 다시" sent the user in a circle. (2) A 32-minute Lua-writing turn: the
+  model call failed 19:38:35, the panel showed only `network error` 14s later (= the 1+2+3+4+5s reattach backoff:
+  the stream broke and all five `/chat/attach` failed). Neither report showed the cause: the block cut every log
+  entry at 240 chars, and a traceback is ONE entry whose last line (`ModelHTTPError: status_code ..., body ...`)
+  is the error.
+- **Fix:** (1) `bugreport.ts` `logEntry` keeps a multi-line entry's first and last lines; the log section also takes
+  the info lines of a lost stream (`agent stream reattach|outcome`, `POST /chat/attach`, `agent turn cut off`); the
+  3500-char cap (`fitReport`) now drops the OLDEST entries - a plain slice used to cut the newest, i.e. the failure.
+  (2) `session._explain` judges 401/429 by `ModelHTTPError.status_code` (a digit search matched token counts in a
+  400 body), quotes the provider's message, and on Vertex points at the quota (TPM, preview-model shared quota) and
+  smaller requests. (3) `GET /chat/outcome` (`session.turn_outcome`: running / done / error / unknown from the
+  buffered turn); after the last reattach fails the panel asks it and shows the turn's own error with the break
+  named, instead of a bare `network error`.
+- Root cause of report (2)'s simultaneous break is still unknown (needs the info lines (1) now carries).
+- Tests: `test_stream_events.py` (outcome states, explain by status), `tests/agent_stream_outcome.mjs`. Gate.
+
 ## §1-120 (2026-10-24): 검수 keeps its grid while a batch writes into the folder
 
 - **Request:** every image a batch saved rebuilt the 검수 DOM; reviewing while the batch ran was not possible.
