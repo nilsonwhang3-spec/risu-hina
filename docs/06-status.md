@@ -32,6 +32,18 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-125 (2026-10-31): the preset form no longer invites a 240000 output cap
+
+- **Report:** an AI Studio user with 402 (prepaid credit) had entered 최대 출력 토큰 240000 after reading the hint
+  "사고 모델은 생각한 토큰도 출력에 포함됩니다 — 32000 이상 권장".
+- **What such a value does:** AI Studio accepts it (measured: 32000 / 65536 / 65537 / 240000 all 200 on
+  gemini-3.8-flash), so it causes no error there itself. In Hina the whole value is reserved out of the history budget
+  (`agentcontext` hard budget = window − fixed − max_tokens − 1024; at or above the 자동 요약 기준 it bottoms out at
+  2000 tokens), and a prepaid route that reserves the worst case per request (OpenRouter, §1-123) reserves that much.
+  Whether AI Studio prepay does the same is not known; Google documents its 402 as a depleted prepay wallet.
+- **Fix (`ui/presets.ts`):** the hint says 32000 is the recommendation and that a value above the model's limit gains
+  nothing; above 65536 a warning under the field explains the history budget and the prepaid reservation.
+
 ## §1-124 (2026-10-31): Google AI Studio no longer gets fields it now refuses
 
 - **Report (the test server, gemini-3.8-flash on generativelanguage.googleapis.com):** every turn failed with 400

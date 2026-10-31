@@ -16,6 +16,9 @@ import { pickerRow, openListPicker, type PickerEntry } from './pickers';
 import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus, type VisionMode, type VisionStatus } from '../state';
 import { transport } from '../transport';
 
+// Above this an output cap only shrinks the history budget (§1-125).
+const MAX_OUTPUT_SANE = 65536;
+
 type Kind = 'general' | 'search';
 
 const KIND_LABEL: Record<Kind, string> = { general: '일반 에이전트', search: '검색 에이전트' };
@@ -765,6 +768,20 @@ function openEditor(
   const keyNote = el('span', { class: 'hint' });
   const ownKeyRow = el('label', { class: 'field' }, [el('span', { text: 'API Key (직접 입력)' }), apiKey, keyNote]);
   const maxTokens = el('input', { placeholder: kind === 'search' ? '16000' : '32000' });
+  // A field report entered 240000 after reading "32000 이상 권장" (§1-125). No
+  // model writes that much; the whole value is reserved out of the history
+  // budget (agentcontext hard budget) and, on prepaid routes, out of credit.
+  const maxWarn = el('div', { class: 'hint warn', style: { display: 'none', marginTop: '-4px', marginBottom: '6px' } });
+  const syncMaxWarn = (): void => {
+    const n = Number(maxTokens.value);
+    const big = Number.isFinite(n) && n > MAX_OUTPUT_SANE;
+    maxWarn.style.display = big ? '' : 'none';
+    maxWarn.textContent = big
+      ? `${n.toLocaleString()} 은 너무 큽니다. 모델이 실제로 쓰는 출력은 대부분 6만 5천 토큰 이하라 더 늘지 않고, `
+        + '이 값만큼 대화 기록 예산이 줄어들며(자동 요약 기준보다 크면 대화를 거의 못 보냅니다) OpenRouter 같은 선불 제공자는 요청마다 이만큼의 금액을 미리 잡습니다. 32000 을 권장합니다.'
+      : '';
+  };
+  maxTokens.addEventListener('input', syncMaxWarn);
   // Blank = not sent. OpenAI's reasoning models refuse any value but their
   // default, and every provider has a sensible one of its own.
   const temperature = el('input', { placeholder: '(비움 = 보내지 않음)' });
@@ -894,6 +911,7 @@ function openEditor(
       baseUrl.value = p.baseUrl;
       model.value = p.model;
       maxTokens.value = String(p.maxTokens);
+      syncMaxWarn();
       temperature.value = p.temperature === null || p.temperature === undefined ? '' : String(p.temperature);
       params.value = p.params || '';
       setSelected(reasoning, p.reasoning || '');
@@ -933,8 +951,9 @@ function openEditor(
       el('label', { class: 'field grow' }, [el('span', { text: '최대 출력 토큰' }), maxTokens]),
       el('label', { class: 'field grow' }, [el('span', { text: 'temperature' }), temperature]),
     ]),
+    maxWarn,
     el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' } }, [
-      '사고 모델은 생각한 토큰도 출력에 포함됩니다 — 32000 이상 권장. temperature 는 비우면 보내지 않습니다.',
+      '사고 모델은 생각한 토큰도 출력에 포함되므로 너무 작게 잡지 마세요 — 32000 권장(대부분 이것으로 충분하고, 모델 한도보다 크게 넣어도 늘지 않습니다). temperature 는 비우면 보내지 않습니다.',
     ]),
     el('label', { class: 'field' }, [el('span', { text: 'Reasoning' }), reasoning]),
     el('div', { class: 'row', style: { marginBottom: '8px' } }, [
