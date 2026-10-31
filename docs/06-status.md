@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-26 (v0.15.53, Risu Hina)
+# 06. Implementation status — as of 2026-10-31 (v0.15.54, Risu Hina)
+
+## 0.15.54 (2026-10-31): §1-122 studio_recipe reads an i2i PNG; empty Gemini replies no longer jam a conversation
 
 ## 0.15.53 (2026-10-26): §1-120 검수 keeps its grid during a batch; §1-121 a lost AI turn shows its own error, 429 by status, reports keep the error line
 
