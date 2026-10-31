@@ -161,6 +161,74 @@ check("a 429 says how to go on", "계속 이어서" in session._explain(ModelHTT
 said = session._explain(RuntimeError("Exceeded the max_tokens limit"))
 check("an output-limit stop says how to go on, first", "계속 이어서" in said
       and said.index("계속 이어서") < said.index("최대 출력 토큰"), said)
+# OpenRouter reserves prompt + max_tokens before running (2026-10-31 report).
+inflight = {"message": "This request would exceed your available credits given your current in-flight requests. "
+                       "Retry after in-flight requests settle, or add credits.", "code": 402,
+            "metadata": {"reason": "in_flight_budget_exhausted", "limit_source": "openrouter_in_flight_budget"}}
+said = session._explain(ModelHTTPError(402, "anthropic/claude-opus-5.5", inflight))
+check("an OpenRouter 402 names the reservation, not a Hina failure",
+      "미리 잡아" in said and "최대 출력 토큰" in said and "available credits" in said, said)
+check("and says the proposals already made are kept", "승인 목록" in said, said)
+check("a bare 402 still names the credit", "크레딧" in session._explain(ModelHTTPError(402, "m", None)))
+
+print("\ntest_in_flight_402_waits_and_retries (§1-123)")
+import asyncio as _aio  # noqa: E402
+import httpx as _httpx  # noqa: E402
+import openai as _openai  # noqa: E402
+from app import agent as _agent  # noqa: E402
+
+
+def _err402(reason: str = "in_flight_budget_exhausted") -> Exception:
+    req = _httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    resp = _httpx.Response(402, request=req, headers={"retry-after": "0"})
+    return _openai.APIStatusError(f"Error code: 402 - {reason}", response=resp, body={"metadata": {"reason": reason}})
+
+
+_calls: list[int] = []
+
+
+async def _flaky(**kw):  # fails twice, then answers
+    _calls.append(1)
+    if len(_calls) <= 2:
+        raise _err402()
+    return "ok"
+
+
+_slept: list[float] = []
+_real_sleep = _aio.sleep
+
+
+async def _fake_sleep(s):
+    _slept.append(s)
+
+
+_aio.sleep = _fake_sleep
+try:
+    got = _aio.run(_agent._in_flight_retry(_flaky, (), {}))
+    check("an in-flight 402 is retried until the budget frees", got == "ok" and len(_calls) == 3, str(_calls))
+    check("with a wait between tries", len(_slept) == 2 and all(s >= 3 for s in _slept), str(_slept))
+    _calls.clear()
+
+    async def _always(**kw):
+        _calls.append(1)
+        raise _err402()
+    try:
+        _aio.run(_agent._in_flight_retry(_always, (), {}))
+        check("it gives up after a few tries", False)
+    except _openai.APIStatusError:
+        check("it gives up after a few tries", len(_calls) == _agent.IN_FLIGHT_TRIES + 1, str(_calls))
+    _calls.clear()
+
+    async def _broke(**kw):
+        _calls.append(1)
+        raise _err402("insufficient_credits")
+    try:
+        _aio.run(_agent._in_flight_retry(_broke, (), {}))
+    except _openai.APIStatusError:
+        pass
+    check("a plain out-of-credit 402 is not retried", len(_calls) == 1, str(_calls))
+finally:
+    _aio.sleep = _real_sleep
 config.load()["agent"]["baseUrl"] = ""
 
 print()

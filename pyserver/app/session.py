@@ -946,6 +946,8 @@ def _explain(e: Exception) -> str:
     status = getattr(e, "status_code", None)
     if not isinstance(status, int):
         status = None
+    if status == 402 or "in_flight_budget" in low:
+        return _explain_402(getattr(e, "body", None), low, limit)
     if status == 401 or (status is None and "401" in text) or "unauthorized" in low or "api key" in low:
         return "모델 API 인증에 실패했습니다. 설정 탭에서 API Key를 확인해 주세요."
     if status == 429 or (status is None and "429" in text) or "rate limit" in low or "resource_exhausted" in low:
@@ -985,6 +987,26 @@ def _provider_message(body: Any) -> str:
         if isinstance(msg, str):
             return msg.strip()
     return ""
+
+
+def _explain_402(body: Any, low: str, limit: Any) -> str:
+    """402 = the provider's prepaid credit. OpenRouter checks a request
+    against the balance BEFORE running it, reserving the worst case (the
+    whole prompt plus `max_tokens` of output): an Opus call over a long bot
+    conversation could be refused with credit still left (2026-10-31 report,
+    `in_flight_budget_exhausted`), and the raw body read as a Hina failure."""
+    said = _provider_message(body)
+    head = "모델 제공자의 크레딧(선불 잔액)이 이 요청에 모자라 요청이 거절됐습니다."
+    if "in_flight" in low:
+        head = ("OpenRouter 가 이 요청을 거절했습니다 (잔액이 있어도 생깁니다): 요청마다 '최대 비용'(지금 대화 전체 입력 + "
+                f"최대 출력 토큰 {limit or ''}개분)을 미리 잡아 두는데, 같은 키로 아직 끝나지 않은 요청(방금 중단했거나 "
+                "연결이 끊긴 요청도 OpenRouter 쪽에서는 끝날 때까지 돕니다)의 몫과 합친 금액이 동시 사용 한도를 넘었습니다. "
+                "Hina 가 몇 번 기다렸다가 다시 보냈지만 풀리지 않았습니다. 실제로 그만큼 쓴 것은 아닙니다.")
+    return (head + "\n"
+            "여기까지 한 작업은 대화에 남아 있고, 이미 올라온 제안은 승인 목록에 그대로 있습니다.\n"
+            "해결: 1~2분 뒤 '계속 이어서 해주세요'로 다시 보내 보세요. 반복되면 크레딧을 충전하거나, ⚙ → AI 에이전트에서 '최대 출력 토큰'을 낮추거나(예: 8000~16000), "
+            "새 대화로 시작해 입력을 줄여 주세요. 비싼 모델(Opus 등)일수록 한 번에 잡히는 금액이 큽니다."
+            + (f"\n(제공자 메시지: {said[:300]})" if said else ""))
 
 
 def _explain_429(body: Any) -> str:

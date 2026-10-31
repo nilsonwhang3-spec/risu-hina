@@ -529,11 +529,40 @@ def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
                 kw.pop(k, None)
             if _chat:
                 toolsigs.attach(kw.get("messages"))
-            out = await _orig(*a, **kw)
+            out = await _in_flight_retry(_orig, a, kw)
             return toolsigs.capture(out) if _chat else out
 
         res.create = create  # type: ignore[method-assign]
     return c
+
+
+IN_FLIGHT_TRIES = 3
+IN_FLIGHT_WAIT_MAX_S = 30.0
+
+
+async def _in_flight_retry(orig: Any, a: tuple, kw: dict) -> Any:
+    """OpenRouter refuses a request with 402 `in_flight_budget_exhausted` when
+    the worst-case cost of it (prompt + max_tokens) plus the requests still
+    running on the same key exceeds the in-flight budget - with $10 left on
+    an uncapped key (2026-10-31 report, Opus over a long conversation). A
+    request the panel just stopped or that lost its connection still runs
+    upstream until it settles. Its answer says to retry after Retry-After;
+    the SDK's own retries skip 402, so wait here (a few times, capped)."""
+    import openai
+    for i in range(IN_FLIGHT_TRIES + 1):
+        try:
+            return await orig(*a, **kw)
+        except openai.APIStatusError as e:
+            if e.status_code != 402 or "in_flight" not in str(e).lower() or i == IN_FLIGHT_TRIES:
+                raise
+            try:
+                wait = float(e.response.headers.get("retry-after") or 0)
+            except (TypeError, ValueError):
+                wait = 0.0
+            wait = min(max(wait, 3.0 * (i + 1)), IN_FLIGHT_WAIT_MAX_S)
+            log.warn("in-flight credit budget full (402), retry %d/%d in %.0fs", i + 1, IN_FLIGHT_TRIES, wait)
+            await asyncio.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def _profile(plan: "providers.Plan", name: str) -> Any:

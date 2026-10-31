@@ -28,6 +28,24 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-123 (2026-10-31): an OpenRouter in-flight 402 waits and retries, and explains itself
+
+- **Field report (오류 제보, anthropic/claude-opus-5.5 via OpenRouter, max output 32000, script edit):** the turn stopped
+  with the raw `ModelHTTPError: status_code: 402 ... in_flight_budget_exhausted`; the reporter read it as Hina
+  spending credit without saving the edit.
+- **Reporter:** more than $10 left, key with no limit. So not the balance: OpenRouter reserves each request's worst
+  case (whole prompt + `max_tokens` output) and adds the requests still running on the key (`current in-flight
+  requests`); a request the panel just stopped, or whose connection dropped, keeps running upstream until it settles.
+  Opus over a long bot conversation with 32000 max output makes each reservation large. The reporter's log is not
+  available, so which request was still in flight is not confirmed. Proposals made earlier in the turn are stored
+  (`actions.propose`) and stay in the approval list.
+- **Fix:** (1) `agent._in_flight_retry` in the OpenAI-compatible client wrapper: a 402 whose body says `in_flight`
+  waits (Retry-After, at least 3/6/9s, at most 30s) and retries up to 3 times; the SDK's own retries skip 402. A 중단
+  during the wait still ends the turn (session cancels the pending call). Other 402s (no credit) are not retried.
+  (2) `session._explain_402`: says what the reservation is, that it happens with credit left, that the work and the
+  proposals are kept, and the remedies (retry in 1-2 min with '계속 이어서 해주세요', credit, a lower 최대 출력 토큰,
+  a new conversation), with the provider's message. Tests: `test_stream_events.py`. Gate.
+
 ## §1-122 (2026-10-31): studio_recipe reads an i2i PNG; empty Gemini replies no longer jam a conversation
 
 - **Field reports (오류 제보, gemini-4-argon via Vercel AI Gateway, iPhone, the test server):** (1) `TypeError: string
