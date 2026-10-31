@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-31 (v0.15.54, Risu Hina)
+# 06. Implementation status — as of 2026-10-31 (v0.15.55, Risu Hina)
+
+## 0.15.55 (2026-10-31): §1-123 an OpenRouter in-flight 402 waits and retries, and explains itself
 
 ## 0.15.54 (2026-10-31): §1-122 studio_recipe reads an i2i PNG; empty Gemini replies no longer jam a conversation
 
