@@ -26,6 +26,28 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-122 (2026-10-31): studio_recipe reads an i2i PNG; empty Gemini replies no longer jam a conversation
+
+- **Field reports (오류 제보, gemini-4-argon via Vercel AI Gateway, iPhone, the test server):** (1) `TypeError: string
+  indices must be integers, not 'str'` from `studio_recipe` on an A1111/Forge i2i image. (2) `UnexpectedModelBehavior:
+  Exceeded maximum output retries (1)` after a view_image of an NSFW image, then the same error on every following
+  prompt of that conversation within 5 seconds, until 새 대화 (same pattern in the log on 2026-10-25).
+- **(1) Cause:** `nai.recipe` stored every unknown tEXt chunk under its lowercased name; A1111/Forge write their recipe
+  as one plain-text `parameters` chunk, which landed on the key where NovelAI's `Comment` dict goes, and
+  `studio_recipe` indexed the string. **Fix:** `parameters` holds only a dict from `Comment` (a non-dict Comment goes to
+  `comment`); A1111's chunk is `sd_parameters`, and `studio_recipe` shows it as text, or says the PNG has no NovelAI
+  parameters.
+- **(2) Cause:** the model answered with nothing (no text, no tool call, no finish reason - most likely the provider's
+  silent safety block). The failed turn's history was stored as captured: empty `ModelResponse`s, pydantic-ai's
+  "Please return text or call a tool." nudges, and our failure note as a second consecutive response. Every later
+  turn replayed those empty model turns and got empty back. **Fix:** `session.drop_empty_replies` removes empty /
+  thinking-only / blank-text replies and the nudge requests (a tool's own retry prompt, which names its tool, is kept);
+  applied when a history is stored (success and partial) and when it is loaded, so existing stuck conversations heal.
+  `_explain` names the error: an empty reply, Gemini's safety filter as the likely reason, '계속 이어서 해주세요' first,
+  then 새 대화 / another model.
+- Not verified against the live model: whether argon answers once the cleaned history is replayed (the stuck session
+  is the reporter's, and replaying it is a full-context paid call). Tests: `test_history.py`, `test_studio.py`. Gate.
+
 ## §1-121 (2026-10-26): a lost turn shows its own error; 429 by status; reports keep the error line
 
 - **Field reports (오류 제보, Vertex gemini-4-argon, desktop):** (1) "모델 쪽에서 요청 한도" at 12:22 and again 12:36

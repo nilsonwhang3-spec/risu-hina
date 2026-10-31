@@ -617,6 +617,13 @@ check("with the filename and a timestamp riding along",
       rec["hina"]["file"] == "임베드-happy-20260829-120000-1.png" and rec["hina"]["createdAt"] > 0)
 check("a non-PNG passes through png_embed untouched",
       studio.png_embed(b"not a png", {"x": 1}) == b"not a png")
+# An A1111/Forge i2i output keeps its recipe as one plain-text `parameters`
+# chunk; it used to land on the key where NovelAI's dict goes, and
+# studio_recipe's p[k] raised "string indices must be integers" (§1-122).
+_sd = studio.png_embed(emb, {}, keyword="parameters")
+_sdrec = nai.recipe(_sd)
+check("a non-NovelAI parameters chunk is not taken for NovelAI's",
+      "parameters" not in _sdrec and "sd_parameters" in _sdrec, json.dumps(_sdrec, ensure_ascii=False)[:160])
 
 print("\ntest_duplicates_and_emotion_check")
 dup = studio.root() / "output" / "중복"

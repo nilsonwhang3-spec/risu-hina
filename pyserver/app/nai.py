@@ -697,9 +697,18 @@ def recipe(png: bytes) -> dict:
             text = value.decode("utf-8", "replace")
             if name == "Comment":
                 try:
-                    out["parameters"] = json.loads(text)
+                    parsed = json.loads(text)
                 except ValueError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    out["parameters"] = parsed
+                else:
                     out["comment"] = text
+            elif name == "parameters":
+                # A1111/Forge write their whole recipe as one plain-text
+                # `parameters` chunk. Stored under its own key: "parameters"
+                # is NovelAI's dict, and a string there broke studio_recipe.
+                out["sd_parameters"] = text
             elif name == "hina-params":
                 # Our own record (studio.png_embed): what was asked for and
                 # which library files it came from. base64(JSON) because tEXt

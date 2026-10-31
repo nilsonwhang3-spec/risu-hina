@@ -28,6 +28,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
+    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -228,6 +229,32 @@ def dedupe_instructions(messages: list) -> list:
     return out
 
 
+def drop_empty_replies(messages: list) -> list:
+    """Remove the model's empty replies and pydantic-ai's "Please return text
+    or call a tool." nudge that answers each one.
+
+    Gemini behind an OpenAI-compatible gateway sometimes answers with nothing
+    at all (no text, no tool call, no finish reason). A failed turn stored
+    those as-is, so every later turn sent the model a history with empty
+    "model" turns in it - and got empty back, in under five seconds, until
+    the user started a new conversation (2026-10-31 report, twice). Thinking
+    without text counts as empty too: it is not sent back as an answer.
+    """
+    out = []
+    for m in messages:
+        if isinstance(m, ModelResponse) and not any(
+                isinstance(p, (TextPart, ToolCallPart)) and (not isinstance(p, TextPart) or p.content.strip())
+                for p in m.parts):
+            # Built-in tool parts (web search on some providers) are kept.
+            if all(isinstance(p, (TextPart, ThinkingPart)) for p in m.parts):
+                continue
+        if isinstance(m, ModelRequest) and m.parts and all(
+                isinstance(p, RetryPromptPart) and not p.tool_name for p in m.parts):
+            continue
+        out.append(m)
+    return out
+
+
 def prune_history(session_id: str, keep: int = HISTORY_KEEP) -> int:
     """Drop every history snapshot but the newest `keep`. Returns rows removed."""
     with db.LOCK:
@@ -273,7 +300,8 @@ def _history(session_id: str) -> list:
     if not raw:
         return []
     try:
-        return ModelMessagesTypeAdapter.validate_python(raw)
+        # Histories stored before §1-122 can still hold empty replies.
+        return drop_empty_replies(ModelMessagesTypeAdapter.validate_python(raw))
     except Exception as e:  # noqa: BLE001 - a corrupt history must not brick the session
         log.warn("history restore failed session=%s: %s", session_id, e)
         return []
@@ -671,7 +699,7 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
         stored = result.all_messages()
         # Pictures the vision tools attached stay in THIS turn only: the stored
         # history carries a placeholder, not 100KB of base64 per image (§1-42).
-        stored = dedupe_instructions(vision.scrub_history(stored))
+        stored = dedupe_instructions(vision.scrub_history(drop_empty_replies(stored)))
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(stored)))
         prune_history(session_id)
@@ -864,7 +892,7 @@ def _save_partial_history(session_id: str, prompt: str, partial: str, why: str,
             history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
         note = (partial + "\n\n" if partial and not captured else "") + f"(이 턴은 완료되지 못했습니다: {why})"
         history.append(ModelResponse(parts=[TextPart(content=note)]))
-        history = dedupe_instructions(vision.scrub_history(history))
+        history = dedupe_instructions(vision.scrub_history(drop_empty_replies(history)))
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(history)))
         prune_history(session_id)
@@ -933,6 +961,14 @@ def _explain(e: Exception) -> str:
                 "같은 지시를 한 번 더 보내 주세요 — 진행하던 내용은 대화 기록에 남아 있습니다.")
     if "not found" in low and "model" in low:
         return "설정된 모델 이름을 찾지 못했습니다. 설정 탭에서 모델명을 확인해 주세요."
+    # Two empty replies in a row (pydantic-ai's output retry). Gemini sends
+    # nothing back with no reason given - most often when it will not
+    # describe what the turn just showed it (an NSFW image, §1-122).
+    if "exceeded maximum output retries" in low:
+        return ("모델이 아무 내용 없는 빈 응답을 연달아 보냈습니다. "
+                "Gemini 는 안전 필터에 걸린 내용(방금 본 성인 이미지 등)에 이유 없이 빈 답을 보내곤 합니다. "
+                "여기까지 한 작업은 대화에 남아 있으니 '계속 이어서 해주세요'라고 보내 보시고, "
+                "계속 반복되면 새 대화로 시작하거나 다른 모델로 바꿔 주세요.")
     return raw
 
 

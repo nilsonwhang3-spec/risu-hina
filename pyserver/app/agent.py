@@ -3121,7 +3121,12 @@ def build(model: Any = None) -> Agent[Deps]:
             return str(e)
         if not r:
             return "NAI 가 만든 PNG 가 아닙니다 (메타데이터 없음)"
-        p = r.get("parameters") or {}
+        p = r.get("parameters") if isinstance(r.get("parameters"), dict) else {}
+        if not p and r.get("sd_parameters"):
+            # Not NovelAI's: an A1111/Forge (i2i) image keeps its recipe as text.
+            return "NovelAI 가 아닌 생성기의 PNG (A1111/Forge 형식)\n" + str(r["sd_parameters"])[:4000]
+        if not p:
+            return "NAI 생성 파라미터가 없는 PNG 입니다 (메타데이터: " + ", ".join(sorted(r)) + ")"
         keep = ("prompt", "uc", "seed", "steps", "scale", "sampler", "width", "height",
                 "noise_schedule", "cfg_rescale")
         lines = [f"source: {r.get('source', '?')}"]
