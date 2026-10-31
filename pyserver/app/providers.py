@@ -140,10 +140,14 @@ PROFILES: list[dict[str, Any]] = [
         "endpoint": "chat",
         "capField": "max_tokens",
         "strictTools": False,
-        "unsupported": [],
+        # Measured 2026-10-31 (§1-124): the endpoint used to ignore unknown
+        # fields and now answers 400 "Unknown name ...: Cannot find field" -
+        # and session.run sends prompt_cache_key on every turn.
+        "unsupported": ["store", "prompt_cache_key", "prompt_cache_retention", "seed", "metadata",
+                        "logprobs", "top_logprobs", "frequency_penalty", "presence_penalty", "logit_bias"],
         "modelRules": [],
         "template": {"reasoning_effort": "low"},
-        "note": "목록에 없는 필드는 무시합니다(베타). 사고 예산은 reasoning_effort(none·low·medium·high; none 은 2.5 계열만) 또는 "
+        "note": "모르는 필드는 400 으로 거절합니다(store·seed·prompt_cache_key·penalty 등, 2026-10 실측). 사고 예산은 reasoning_effort(none·low·medium·high; none 은 2.5 계열만) 또는 "
                 "extra_body.google.thinking_config 로 — 둘을 같이 쓰면 안 됩니다. service_tier 는 flex/priority.",
         "docs": "https://ai.google.dev/gemini-api/docs/openai",
     },

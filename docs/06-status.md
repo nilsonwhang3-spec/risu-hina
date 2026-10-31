@@ -30,6 +30,21 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-124 (2026-10-31): Google AI Studio no longer gets fields it now refuses
+
+- **Report (the test server, gemini-3.8-flash on generativelanguage.googleapis.com):** every turn failed with 400
+  `Invalid JSON payload received. Unknown name "prompt_cache_key": Cannot find field.`
+- **Cause:** the AI Studio OpenAI-compatible endpoint used to ignore unknown fields (the profile said so and listed
+  none as unsupported); it now rejects them, and `session.run` sends `prompt_cache_key` on every turn (§1-62).
+  Probed one field at a time with the test server's key: 400 for `store`, `prompt_cache_key`,
+  `prompt_cache_retention`, `seed`, `metadata`, `logprobs`, `frequency_penalty`, and `presence_penalty` ("Penalty is
+  not enabled for this model"); accepted: `parallel_tool_calls`, `stream_options`, `reasoning_effort`, `user`,
+  `tool_choice`, `service_tier`, `top_p`, `temperature`.
+- **Fix:** the `google` profile lists those (plus `top_logprobs`, `logit_bias`) as unsupported, so `agent._client` pops
+  them; the profile note says unknown fields are refused. Verified: `agent._client` with the new plan, sending
+  `prompt_cache_key`/`prompt_cache_retention`/`store`, gets 200 from AI Studio. Vertex was not probed (its profile
+  still lists nothing). Tests: `test_providers.py`. Gate.
+
 ## §1-123 (2026-10-31): an OpenRouter in-flight 402 waits and retries, and explains itself
 
 - **Field report (오류 제보, anthropic/claude-opus-5.5 via OpenRouter, max output 32000, script edit):** the turn stopped

@@ -83,6 +83,11 @@ check("anthropic: max_tokens", pl.cap_field == "max_tokens" and pl.api == "chat"
 pl = P.plan_for(cfg(baseUrl="https://generativelanguage.googleapis.com/v1beta/openai", model="gemini-2.5-flash",
                     params='{"reasoning_effort": "low"}'))
 check("gemini: reasoning_effort from JSON", pl.settings.get("openai_reasoning_effort") == "low")
+# AI Studio now 400s on unknown fields (§1-124); session.run sends the cache key every turn.
+pl = P.plan_for(cfg(baseUrl="https://generativelanguage.googleapis.com/v1beta/openai", model="gemini-3.8-flash", cache=True))
+check("gemini: the prompt cache key is never sent",
+      {"prompt_cache_key", "prompt_cache_retention", "store", "seed"} <= pl.drop_all
+      and "openai_prompt_cache_key" not in pl.settings, str(pl.drop_all))
 
 # --- the JSON's precedence --------------------------------------------------------
 pl = P.plan_for(cfg(temperature=0.5, params='{"temperature": null}'))
