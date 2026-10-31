@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-31 (v0.15.55, Risu Hina)
+# 06. Implementation status — as of 2026-10-31 (v0.15.56, Risu Hina)
+
+## 0.15.56 (2026-10-31): §1-124 Google AI Studio no longer gets fields it now refuses (prompt_cache_key 400)
 
 ## 0.15.55 (2026-10-31): §1-123 an OpenRouter in-flight 402 waits and retries, and explains itself
 
