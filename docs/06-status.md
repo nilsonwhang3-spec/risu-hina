@@ -32,6 +32,21 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-126 (2026-11-03): the API key is optional (a local LLM takes none)
+
+- **Report (community):** a local LLM endpoint needs no key, but Hina demanded one; any made-up key happened to work
+  with theirs, and they pointed out that this will not hold everywhere.
+- **Where the key was required:** `main.agent_ready` (the panel's 전송 disabled + "자격증명이 아직 설정되지 않았습니다"),
+  `agent._model_for` (RuntimeError before any request), the connection test (`config` stage "baseUrl · apiKey · model
+  이 모두 필요합니다"), and `websearch.ready` in native mode. The vision helper already allowed no key, on loopback only.
+- **Fix:** all four ask for baseUrl + model. The OpenAI SDK (3.3.1) refuses an empty key ("Missing credentials"), so
+  `keys.client_key` returns the stand-in `keys.NO_KEY` = `sk-no-key-required` (llama.cpp's own placeholder; a server
+  without a key configured ignores the bearer); the native search clients use it too. The connection test is a raw
+  httpx request and sends no Authorization header when the key is empty. A cloud endpoint left without a key now
+  fails with its own 401 at the test or the first turn instead of the setup notice.
+- Verified: `tests/test_keyless_endpoint.py` (gate) - readiness without a key, the stand-in, a mock-transport request
+  through the agent's own client carrying `Bearer sk-no-key-required`, the model building without a key.
+
 ## §1-125 (2026-10-31): the preset form no longer invites a 240000 output cap
 
 - **Report:** an AI Studio user with 402 (prepaid credit) had entered 최대 출력 토큰 240000 after reading the hint

@@ -122,7 +122,7 @@ def ready() -> bool:
         a = _agent_cfg()
         if (a.get("provider") or "") == "codex":
             return bool(a.get("model")) and codexauth.logged_in()
-        return bool(a.get("baseUrl") and a.get("apiKey") and a.get("model"))
+        return bool(a.get("baseUrl") and a.get("model"))
     if m == "gemini":
         return bool(_gemini_key())
     c = _cfg()
@@ -396,7 +396,7 @@ def _responses_text(r: Any) -> str:
 
 async def _openai_responses_search(base: str, key: str, model: str, q: str) -> str:
     import openai
-    c = openai.AsyncOpenAI(base_url=base, api_key=key, timeout=NATIVE_TIMEOUT)
+    c = openai.AsyncOpenAI(base_url=base, api_key=key or keys.NO_KEY, timeout=NATIVE_TIMEOUT)
     r = await c.responses.create(model=model, instructions=_NATIVE_INSTRUCTIONS,
                                  input=[{"role": "user", "content": q}], tools=[{"type": "web_search"}])
     return _responses_text(r)
@@ -404,7 +404,7 @@ async def _openai_responses_search(base: str, key: str, model: str, q: str) -> s
 
 async def _openai_chat_tool(base: str, key: str, model: str, q: str, extra: dict) -> str:
     import openai
-    c = openai.AsyncOpenAI(base_url=base, api_key=key, timeout=NATIVE_TIMEOUT)
+    c = openai.AsyncOpenAI(base_url=base, api_key=key or keys.NO_KEY, timeout=NATIVE_TIMEOUT)
     r = await c.chat.completions.create(
         model=model,
         messages=[{"role": "system", "content": _NATIVE_INSTRUCTIONS}, {"role": "user", "content": q}],

@@ -150,8 +150,9 @@ def agent_ready() -> bool:
     a = config.section("agent")
     if (a.get("provider") or "") == "codex":
         return bool((a.get("model") or "").strip()) and codexauth.logged_in()
+    # The key is optional: a local endpoint takes none. A cloud endpoint
+    # without one answers 401, and that error names the key.
     return bool((a.get("baseUrl") or "").strip()
-                and (a.get("apiKey") or "").strip()
                 and (a.get("model") or "").strip())
 
 
@@ -248,8 +249,8 @@ def h_config_test(arg: dict) -> dict:
     base = (agent.get("baseUrl") or "").rstrip("/")
     key = agent.get("apiKey") or ""
     model = agent.get("model") or ""
-    if not (base and key and model):
-        return {"ok": False, "stage": "config", "error": "baseUrl · apiKey · model 이 모두 필요합니다"}
+    if not (base and model):
+        return {"ok": False, "stage": "config", "error": "baseUrl · model 이 필요합니다 (API 키는 로컬 LLM 처럼 키가 없는 주소면 비워도 됩니다)"}
 
     try:
         base, key = keys.runtime(base, key)
@@ -259,7 +260,9 @@ def h_config_test(arg: dict) -> dict:
     # from the endpoint, not from the model. Qualify it the same way the agent
     # does so the test measures the request the agent will make.
     model = providers.model_for(base, model)
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     # The same request the agent will make: the plan decides the API
     # (chat/completions or responses), the cap field, and what not to send.
     plan = presets.plan(section)

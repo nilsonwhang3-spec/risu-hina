@@ -384,7 +384,7 @@ export class AgentPanel {
           el('div', { text: '에이전트 자격증명이 아직 설정되지 않았습니다.' }),
           el('div', {
             class: 'hint',
-            text: '오른쪽 위 ⚙ → 에이전트에서 Base URL · Model · API Key를 넣고 연결 테스트를 해 주세요.',
+            text: '오른쪽 위 ⚙ → 에이전트에서 Base URL · Model(키가 필요한 곳이면 API Key도)을 넣고 연결 테스트를 해 주세요.',
           }),
         ]));
         this.send.disabled = true;

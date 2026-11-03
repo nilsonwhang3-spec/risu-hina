@@ -132,6 +132,13 @@ def runtime(base_url: str, api_key: str) -> tuple[str, str]:
     return base_url, api_key
 
 
+# What an OpenAI client sends when the endpoint takes no key (a local
+# llama.cpp, LM Studio, Ollama, vLLM). The SDK refuses an empty key outright
+# ("Missing credentials"), and a server without a key configured ignores the
+# bearer - llama.cpp's own docs use this very string.
+NO_KEY = "sk-no-key-required"
+
+
 def client_key(base_url: str, api_key: str) -> Any:
     """The api_key for a long-lived AsyncOpenAI: a plain key as is, but for
     Vertex JSON a callable the client awaits before every request.
@@ -141,7 +148,10 @@ def client_key(base_url: str, api_key: str) -> Any:
     hour later - 401, "모델 API 인증에 실패했습니다", until switching the
     model or reasoning level rebuilt the agent. access_token caches and renews
     5 minutes before expiry, so asking it per request costs nothing. The first
-    exchange still happens here so a bad JSON fails at build, as before."""
+    exchange still happens here so a bad JSON fails at build, as before.
+    No key at all is a keyless endpoint: NO_KEY stands in for it."""
+    if not (api_key or "").strip():
+        return NO_KEY
     base_url, token = runtime(base_url, api_key)
     if token == api_key:
         return api_key

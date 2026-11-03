@@ -481,8 +481,9 @@ def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
         return OpenAIResponsesModel(name, provider=OpenAIProvider(openai_client=codexauth.client()))
     base = (cfg.get("baseUrl") or "").rstrip("/")
     key = cfg.get("apiKey") or ""
-    if not (base and key and name):
-        raise RuntimeError("에이전트 자격증명이 설정되지 않았습니다 (설정 탭에서 baseUrl/apiKey/model)")
+    # No key is a keyless endpoint (a local LLM); client_key fills in for it.
+    if not (base and name):
+        raise RuntimeError("에이전트 설정이 비어 있습니다 (설정 탭에서 baseUrl/model; API 키는 키 없는 로컬 LLM 이면 비워도 됩니다)")
     key = keys.client_key(base, key)
     # Vertex's OpenAI-compatible endpoint takes <publisher>/<model>; a bare
     # name is rejected by the endpoint before the model is ever consulted.
