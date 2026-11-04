@@ -638,7 +638,7 @@ async def describe_with_helper(images: list[Loaded], question: str, instructions
         "max_tokens": 1200,
         "temperature": 0.2,
     }
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", **providers.auto_headers(base)}
     if key:
         headers["Authorization"] = f"Bearer {key}"
     async with httpx.AsyncClient(timeout=timeout_s()) as c:

@@ -31,6 +31,7 @@ run "Vertex token renewal"    "$PY" tests/test_vertexauth.py
 run "Sign in with ChatGPT"     "$PY" tests/test_codexauth.py
 run "Vertex web search/vision auth" "$PY" tests/test_websearch_vertex.py
 run "Keyless endpoint (local LLM, no API key)" "$PY" tests/test_keyless_endpoint.py
+run "OpenCode session header (x-opencode-session)" "$PY" tests/test_opencode_session_header.py
 run "provider plan & hints"   "$PY" tests/test_providers.py
 run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py

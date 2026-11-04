@@ -23,8 +23,10 @@ presets.model_settings (pydantic-ai settings) and the connection test.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import re
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -259,6 +261,8 @@ PROFILES: list[dict[str, Any]] = [
         "name": "OpenCode Go (구독)",
         "api": "https://opencode.ai/zen/go/v1",
         "hosts": ["opencode.ai/zen/go"],
+        "sessionHeader": "x-opencode-session",
+        "identify": True,
         "auth": "Authorization: Bearer <Go 전용 API 키>",
         "modelExample": "kimi-k3",
         "endpoint": "chat",
@@ -279,6 +283,8 @@ PROFILES: list[dict[str, Any]] = [
         "name": "OpenCode Zen (종량제)",
         "api": "https://opencode.ai/zen/v1",
         "hosts": ["opencode.ai"],
+        "sessionHeader": "x-opencode-session",
+        "identify": True,
         "auth": "Authorization: Bearer <Zen API 키>",
         "modelExample": "kimi-k3",
         "endpoint": "chat",
@@ -411,6 +417,59 @@ def for_url(base_url: str) -> dict | None:
         if any(h in where for h in p["hosts"]):
             return p
     return None
+
+
+# The Hina conversation the current request belongs to. session.run sets it for
+# the turn; everything the turn calls (the agent, the context summariser, the
+# vision helper) inherits it, so their requests carry the same session header.
+CURRENT_SESSION: contextvars.ContextVar[str] = contextvars.ContextVar("hina_session", default="")
+# Requests outside any conversation (connection test, background work) share
+# one id per process - stable, as the header asks, never rotated on a timer.
+_PROCESS_SESSION = "risu-hina-" + uuid.uuid4().hex[:16]
+
+
+def session_id(explicit: str = "") -> str:
+    """The routing id for this request: the given one, the conversation's, or
+    the process's."""
+    if explicit:
+        return explicit
+    cur = CURRENT_SESSION.get()
+    return f"risu-hina-{cur}" if cur else _PROCESS_SESSION
+
+
+def auto_headers(base_url: str, session: str = "") -> dict[str, str]:
+    """Headers a provider requires that the OpenAI SDK does not send.
+
+    OpenCode Go/Zen refuse a request without `x-opencode-session` (400
+    MissingSessionID, 2026-11 report) and ask for "a stable session ID for
+    each conversation" so routing and prompt caching stick; they also ask a
+    client to name itself instead of sending a generic library user agent.
+    One Hina conversation = one id (the same one already sent as
+    prompt_cache_key), so the cache keeps hitting across its turns.
+    """
+    p = for_url(base_url) or {}
+    out: dict[str, str] = {}
+    if p.get("identify"):
+        from . import config
+        out["User-Agent"] = f"{config.APP_NAME}/{config.VERSION}"
+    if p.get("sessionHeader"):
+        out[str(p["sessionHeader"])] = session_id(session)
+    return out
+
+
+def merge_headers(given: dict | None, auto: dict[str, str]) -> dict[str, str]:
+    """`auto` under the headers already set: a header the user put in the
+    preset's extra_headers wins (case-insensitively); a library's own
+    User-Agent does not."""
+    out = dict(given or {})
+    have = {k.lower(): k for k in out}
+    for k, v in auto.items():
+        cur = have.get(k.lower())
+        if cur is None:
+            out[k] = v
+        elif k.lower() == "user-agent" and str(out[cur]).startswith(("pydantic-ai/", "OpenAI/", "AsyncOpenAI/", "python-httpx/")):
+            out[cur] = v
+    return out
 
 
 def public() -> list[dict]:

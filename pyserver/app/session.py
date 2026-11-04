@@ -632,6 +632,9 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
         from . import continuity
         deps.continuity_parts = continuity.build(session_id, crow["char_key"], history)
         captured = capture_stack.enter_context(capture_run_messages())
+        # The conversation every request of this turn belongs to - provider
+        # session headers (OpenCode) read it, the summariser's calls included.
+        providers.CURRENT_SESSION.set(session_id)
         # Prompt-cache routing key = this session (§1-62). Merged over the
         # agent's settings; providers whose plan forbids the field drop it in
         # the client wrapper, and the Codex wrapper keeps it (codexauth).

@@ -269,6 +269,12 @@ def h_config_test(arg: dict) -> dict:
     responses = plan.api == "responses"
     url = base + ("/responses" if responses else "/chat/completions")
     extra = plan.raw
+    # extra_headers is an HTTP header map, not a body field: it used to ride in
+    # the JSON body, so a header the preset set (x-opencode-session) never
+    # reached the provider and the test failed where the agent would not.
+    headers = providers.merge_headers(
+        {**headers, **(extra.pop("extra_headers", None) or {})},
+        providers.auto_headers(base, "risu-hina-test"))
     if responses:
         extra.pop("reasoning", None)   # the test wants a short answer, not a thought
         extra["max_output_tokens"] = min(int(extra.get("max_output_tokens") or 4096), 4096)

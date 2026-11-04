@@ -526,6 +526,11 @@ def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
         chat = res is c.chat.completions
 
         async def create(*a: Any, _orig: Any = orig, _chat: bool = chat, **kw: Any) -> Any:
+            # Provider-required headers (OpenCode's per-conversation session
+            # id), read before `drop` may pop the prompt_cache_key they reuse.
+            auto = providers.auto_headers(base, str(kw.get("prompt_cache_key") or ""))
+            if auto:
+                kw["extra_headers"] = providers.merge_headers(kw.get("extra_headers"), auto)
             for k in drop:
                 kw.pop(k, None)
             if _chat:

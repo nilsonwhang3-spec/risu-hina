@@ -32,6 +32,30 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-127 (2026-11-05): OpenCode Go/Zen get `x-opencode-session` on their own
+
+- **Report (community):** an OpenCode Go key failed the connection test with HTTP 400 `MissingSessionID` ("Request is
+  missing x-opencode-session"); the preset form has no header field, and `extra_headers` in the parameter JSON did
+  not help either. They also asked for the header to be filled in automatically, with a session id that rotates.
+- **Two causes:** (1) nothing ever sent the header; (2) the connection test copied `plan.raw` into the JSON *body*, so
+  `extra_headers` from the parameter JSON travelled as a body field and never became a header (the agent itself, via
+  pydantic-ai, did send it).
+- **Fix:** the `opencode-go` / `opencode` profiles carry `sessionHeader: x-opencode-session` and `identify` (a
+  `risu-hina/<version>` User-Agent - OpenCode's docs ask third-party clients not to send a generic library UA).
+  `providers.auto_headers` builds them; the agent's client wrapper adds them per request from `prompt_cache_key`
+  (read before the plan drops that field - OpenCode marks it unsupported), so one Hina conversation = one id
+  `risu-hina-<sessionId>`, the same routing key the other providers get as prompt_cache_key. Calls without a cache
+  key (the context summariser, the vision helper) take it from `providers.CURRENT_SESSION`, which `session.run`
+  sets for the turn; outside a conversation one id per process. A header set in `extra_headers` wins
+  (case-insensitive). The connection test moves `extra_headers` into the HTTP headers and adds the auto ones.
+- **Not done: timed rotation.** OpenCode's Go docs ask for "a stable session ID for each conversation so we can
+  optimize routing and prompt caching"; rotating it on a timer would break the cache mid-conversation. A new Hina
+  conversation (새 대화) already gets a new id.
+- Verified: `tests/test_opencode_session_header.py` (gate) - profiles, id precedence, merge rules, mock-transport
+  requests through the agent's own client (header present, prompt_cache_key still dropped from the body, user
+  override kept, other providers untouched), and the connection test with and without `extra_headers`. Not checked
+  against the live OpenCode endpoint (no Go key here).
+
 ## §1-126 (2026-11-03): the API key is optional (a local LLM takes none)
 
 - **Report (community):** a local LLM endpoint needs no key, but Hina demanded one; any made-up key happened to work
