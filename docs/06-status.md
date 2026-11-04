@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-31 (v0.15.56, Risu Hina)
+# 06. Implementation status — as of 2026-11-05 (v0.15.57, Risu Hina)
+
+## 0.15.57 (2026-11-05): §1-125 output-cap hint says 32000; §1-126 the API key is optional (local LLM); §1-127 OpenCode Go/Zen get x-opencode-session
 
 ## 0.15.56 (2026-10-31): §1-124 Google AI Studio no longer gets fields it now refuses (prompt_cache_key 400)
 

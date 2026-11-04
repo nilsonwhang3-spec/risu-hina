@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.56
+//@display-name Risu Hina v0.15.57
 //@api 3.0
-//@version 0.15.56
+//@version 0.15.57
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -284,7 +284,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.56", String(body.version || ""));
+          this.gate = versionGate("0.15.57", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -10640,7 +10640,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             el("div", { text: "\uC5D0\uC774\uC804\uD2B8 \uC790\uACA9\uC99D\uBA85\uC774 \uC544\uC9C1 \uC124\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4." }),
             el("div", {
               class: "hint",
-              text: "\uC624\uB978\uCABD \uC704 \u2699 \u2192 \uC5D0\uC774\uC804\uD2B8\uC5D0\uC11C Base URL \xB7 Model \xB7 API Key\uB97C \uB123\uACE0 \uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB97C \uD574 \uC8FC\uC138\uC694."
+              text: "\uC624\uB978\uCABD \uC704 \u2699 \u2192 \uC5D0\uC774\uC804\uD2B8\uC5D0\uC11C Base URL \xB7 Model(\uD0A4\uAC00 \uD544\uC694\uD55C \uACF3\uC774\uBA74 API Key\uB3C4)\uC744 \uB123\uACE0 \uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB97C \uD574 \uC8FC\uC138\uC694."
             })
           ]));
           this.send.disabled = true;
@@ -16821,6 +16821,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   // src/ui/presets.ts
   init_state();
   init_transport();
+  var MAX_OUTPUT_SANE = 65536;
   var KIND_LABEL2 = { general: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8", search: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8" };
   var REASONING_LABEL = {
     "": "\uBCF4\uB0B4\uC9C0 \uC54A\uC74C",
@@ -17488,6 +17489,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const keyNote = el("span", { class: "hint" });
     const ownKeyRow = el("label", { class: "field" }, [el("span", { text: "API Key (\uC9C1\uC811 \uC785\uB825)" }), apiKey, keyNote]);
     const maxTokens = el("input", { placeholder: kind === "search" ? "16000" : "32000" });
+    const maxWarn = el("div", { class: "hint warn", style: { display: "none", marginTop: "-4px", marginBottom: "6px" } });
+    const syncMaxWarn = () => {
+      const n = Number(maxTokens.value);
+      const big = Number.isFinite(n) && n > MAX_OUTPUT_SANE;
+      maxWarn.style.display = big ? "" : "none";
+      maxWarn.textContent = big ? `${n.toLocaleString()} \uC740 \uB108\uBB34 \uD07D\uB2C8\uB2E4. \uBAA8\uB378\uC774 \uC2E4\uC81C\uB85C \uC4F0\uB294 \uCD9C\uB825\uC740 \uB300\uBD80\uBD84 6\uB9CC 5\uCC9C \uD1A0\uD070 \uC774\uD558\uB77C \uB354 \uB298\uC9C0 \uC54A\uACE0, \uC774 \uAC12\uB9CC\uD07C \uB300\uD654 \uAE30\uB85D \uC608\uC0B0\uC774 \uC904\uC5B4\uB4E4\uBA70(\uC790\uB3D9 \uC694\uC57D \uAE30\uC900\uBCF4\uB2E4 \uD06C\uBA74 \uB300\uD654\uB97C \uAC70\uC758 \uBABB \uBCF4\uB0C5\uB2C8\uB2E4) OpenRouter \uAC19\uC740 \uC120\uBD88 \uC81C\uACF5\uC790\uB294 \uC694\uCCAD\uB9C8\uB2E4 \uC774\uB9CC\uD07C\uC758 \uAE08\uC561\uC744 \uBBF8\uB9AC \uC7A1\uC2B5\uB2C8\uB2E4. 32000 \uC744 \uAD8C\uC7A5\uD569\uB2C8\uB2E4.` : "";
+    };
+    maxTokens.addEventListener("input", syncMaxWarn);
     const temperature = el("input", { placeholder: "(\uBE44\uC6C0 = \uBCF4\uB0B4\uC9C0 \uC54A\uC74C)" });
     const reasoning = reasoningSelect();
     const params = el("textarea", {
@@ -17602,6 +17611,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         baseUrl.value = p.baseUrl;
         model.value = p.model;
         maxTokens.value = String(p.maxTokens);
+        syncMaxWarn();
         temperature.value = p.temperature === null || p.temperature === void 0 ? "" : String(p.temperature);
         params.value = p.params || "";
         setSelected(reasoning, p.reasoning || "");
@@ -17636,8 +17646,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("label", { class: "field grow" }, [el("span", { text: "\uCD5C\uB300 \uCD9C\uB825 \uD1A0\uD070" }), maxTokens]),
         el("label", { class: "field grow" }, [el("span", { text: "temperature" }), temperature])
       ]),
+      maxWarn,
       el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" } }, [
-        "\uC0AC\uACE0 \uBAA8\uB378\uC740 \uC0DD\uAC01\uD55C \uD1A0\uD070\uB3C4 \uCD9C\uB825\uC5D0 \uD3EC\uD568\uB429\uB2C8\uB2E4 \u2014 32000 \uC774\uC0C1 \uAD8C\uC7A5. temperature \uB294 \uBE44\uC6B0\uBA74 \uBCF4\uB0B4\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+        "\uC0AC\uACE0 \uBAA8\uB378\uC740 \uC0DD\uAC01\uD55C \uD1A0\uD070\uB3C4 \uCD9C\uB825\uC5D0 \uD3EC\uD568\uB418\uBBC0\uB85C \uB108\uBB34 \uC791\uAC8C \uC7A1\uC9C0 \uB9C8\uC138\uC694 \u2014 32000 \uAD8C\uC7A5(\uB300\uBD80\uBD84 \uC774\uAC83\uC73C\uB85C \uCDA9\uBD84\uD558\uACE0, \uBAA8\uB378 \uD55C\uB3C4\uBCF4\uB2E4 \uD06C\uAC8C \uB123\uC5B4\uB3C4 \uB298\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4). temperature \uB294 \uBE44\uC6B0\uBA74 \uBCF4\uB0B4\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
       ]),
       el("label", { class: "field" }, [el("span", { text: "Reasoning" }), reasoning]),
       el("div", { class: "row", style: { marginBottom: "8px" } }, [
@@ -18565,7 +18576,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       diag = null;
     }
     const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
-    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.56"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.57"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
     const health = state.health ?? {};
     lines.push("\uD658\uACBD: " + [
       `RisuAI ${transport.hostPlatform || "?"}`,
@@ -18689,10 +18700,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.56";
+          const mismatch = r.current !== "0.15.57";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.56"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.57"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18785,7 +18796,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.56",
+            version: "0.15.57",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -20222,7 +20233,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.56"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.57"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -28310,14 +28321,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.56"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.57"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.56", h.version, h.installKind);
+      const behind = backendBehind("0.15.57", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28418,7 +28429,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.56" }),
+        el("span", { class: "dim", text: "v0.15.57" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28780,6 +28791,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.56"} loaded`);
+    console.log(`[risu-hina] v${"0.15.57"} loaded`);
   })();
 })();
