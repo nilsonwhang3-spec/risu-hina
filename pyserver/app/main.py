@@ -455,7 +455,7 @@ def _config_test_codex(agent: dict) -> dict:
                     raise
                 calls, answer = await tool_round("auto")
         except Exception as e:  # noqa: BLE001 - reported, not raised
-            said = codexauth.explain(str(e))
+            said = codexauth.explain(codexauth.error_text(e))
             return {"ok": False, "stage": stage,
                     "error": (said or f"{type(e).__name__}: {e}")[:600],
                     "api": "responses", "note": "ChatGPT 요금제"}

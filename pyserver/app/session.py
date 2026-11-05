@@ -941,7 +941,7 @@ def _explain(e: Exception) -> str:
     low = text.lower()
     if (config.section("agent").get("provider") or "") == "codex":
         from . import codexauth
-        said = codexauth.explain(text)
+        said = codexauth.explain(codexauth.error_text(e))
         if said:
             return said
     # The HTTP status when the library kept one (ModelHTTPError). A digit

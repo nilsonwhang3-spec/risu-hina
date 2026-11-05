@@ -268,6 +268,15 @@ with patch("httpx.get", side_effect=fake_get), patch("httpx.post", side_effect=f
     print("test_errors_are_explained")
     said = C.explain("Error code: 429 - {'error': {'code': 'subscription_sharing_usage_limit_exceeded'}}")
     check("usage limit points at ChatGPT usage settings", said and "chatgpt.com/settings/usage" in said, said)
+    said = C.explain("APIError: The ChatGPT user has reached their Subscription Sharing usage limit. "
+                     "Ask the user to try again after their usage limit resets or use an API key instead.")
+    check("usage limit by message alone (stream error event) is explained",
+          said and "chatgpt.com/settings/usage" in said, said)
+    class _StreamErr(Exception):
+        code = None
+        body = {"code": "subscription_sharing_usage_unavailable", "message": "usage unavailable"}
+    check("a code only in .body is recovered",
+          "잠시 후" in (C.explain(C.error_text(_StreamErr("usage unavailable"))) or ""))
     check("401 says sign in again, not API key", "로그인" in (C.explain("Error code: 401") or ""))
     check("unrelated text is left alone", C.explain("some other failure") is None)
 

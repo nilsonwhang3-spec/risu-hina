@@ -693,6 +693,27 @@ _ERRORS = {
 }
 
 
+# The same failures by their message, for when only the message survives
+# (seen live: "The ChatGPT user has reached their Subscription Sharing usage limit. ...").
+_MESSAGES = (
+    ("subscription sharing usage limit", "subscription_sharing_usage_limit_exceeded"),
+)
+
+
+def error_text(e: BaseException) -> str:
+    """str(e) plus the error code when only the exception carries it: the
+    openai SDK raises a stream `error` event as APIError(message) with the
+    code in `.code` / `.body`, not in the text."""
+    text = str(e)
+    code = getattr(e, "code", None)
+    if not code:
+        body = getattr(e, "body", None)
+        code = body.get("code") if isinstance(body, dict) else None
+    if isinstance(code, str) and code and code not in text:
+        text = f"{text} ({code})"
+    return text
+
+
 def explain(text: str) -> str | None:
     """A user-facing sentence for a ChatGPT-plan failure, or None. The code
     and the raw text stay attached (the docs ask to keep them)."""
@@ -700,6 +721,11 @@ def explain(text: str) -> str | None:
         if code in text:
             return f"{say}\n({code}) {text[:300]}"
     low = text.lower()
+    # A failure that arrives as a stream `error` event becomes a bare
+    # APIError whose text is the message alone - no code, no status.
+    for phrase, code in _MESSAGES:
+        if phrase in low:
+            return f"{_ERRORS[code]}\n({code}) {text[:300]}"
     if "401" in text or "unauthorized" in low:
         return ("ChatGPT 요금제 인증이 거부됐습니다. ⚙ → API 키 → ChatGPT 요금제에서 계정과 권한을 확인하고, "
                 f"필요하면 다시 로그인해 주세요.\n{text[:300]}")
