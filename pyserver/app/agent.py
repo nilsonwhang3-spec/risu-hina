@@ -521,6 +521,7 @@ def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
     """
     import openai
     c = openai.AsyncOpenAI(base_url=base, api_key=key, timeout=timeout)
+    _vertex = is_vertex(base)
     for res in (c.chat.completions, c.responses):
         orig = res.create
         chat = res is c.chat.completions
@@ -535,7 +536,10 @@ def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
                 kw.pop(k, None)
             if _chat:
                 toolsigs.attach(kw.get("messages"))
-            out = await _in_flight_retry(_orig, a, kw)
+            if _vertex:
+                out = await _contention_retry(lambda: _in_flight_retry(_orig, a, kw))
+            else:
+                out = await _in_flight_retry(_orig, a, kw)
             return toolsigs.capture(out) if _chat else out
 
         res.create = create  # type: ignore[method-assign]
@@ -567,6 +571,60 @@ async def _in_flight_retry(orig: Any, a: tuple, kw: dict) -> Any:
                 wait = 0.0
             wait = min(max(wait, 3.0 * (i + 1)), IN_FLIGHT_WAIT_MAX_S)
             log.warn("in-flight credit budget full (402), retry %d/%d in %.0fs", i + 1, IN_FLIGHT_TRIES, wait)
+            await asyncio.sleep(wait)
+    raise AssertionError("unreachable")
+
+
+# Vertex 429 (§1-128). Gemini on Vertex pay-as-you-go has no fixed per-project
+# quota: a 429 is "transient high contention for a shared resource", and
+# Google's answer is exponential backoff (the 429 / Standard PayGo docs). The
+# SDK's own two retries wait well under ten seconds in all, which the field
+# reports showed is not long enough - the same turn failed again and again.
+# 5+10+20+40+40 s (+-20%), about two minutes, then the explanation.
+CONTENTION_TRIES = 5
+CONTENTION_FIRST_S = 5.0
+CONTENTION_WAIT_MAX_S = 40.0
+
+
+def is_vertex(base: str) -> bool:
+    return "aiplatform.googleapis.com" in (base or "").lower()
+
+
+def _is_contention(e: Exception) -> bool:
+    import openai
+    if not isinstance(e, openai.APIStatusError) or e.status_code != 429:
+        return False
+    # A 429 that says it is a hard quota (a per-day cap, a project quota the
+    # user set) does not clear in a minute; waiting would only delay the
+    # explanation. Vertex's contention 429 says RESOURCE_EXHAUSTED and
+    # "Resource exhausted, please try again later".
+    # ("generate_content_requests_per_day", "per day", "PerDay").
+    return re.search(r"per[ _-]?day", str(e), re.IGNORECASE) is None
+
+
+async def _contention_retry(call: Any) -> Any:
+    """`call()` again after a Vertex contention 429, with exponential backoff
+    and jitter. The same request goes out unchanged (same key, same prompt),
+    so the provider's prompt cache keeps hitting. The panel hears about each
+    wait through a `wait` stream event so the turn does not look stuck."""
+    import random
+    for i in range(CONTENTION_TRIES + 1):
+        try:
+            return await call()
+        except Exception as e:  # noqa: BLE001 - only a contention 429 is retried
+            if i == CONTENTION_TRIES or not _is_contention(e):
+                raise
+            base_wait = min(CONTENTION_FIRST_S * (2 ** i), CONTENTION_WAIT_MAX_S)
+            try:
+                hinted = float(e.response.headers.get("retry-after") or 0)  # type: ignore[attr-defined]
+            except (TypeError, ValueError, AttributeError):
+                hinted = 0.0
+            wait = min(max(base_wait, hinted), CONTENTION_WAIT_MAX_S) * random.uniform(0.8, 1.2)
+            log.warn("Vertex 429 (shared capacity busy), retry %d/%d in %.0fs", i + 1, CONTENTION_TRIES, wait)
+            from . import session
+            session.push_stream_event(providers.CURRENT_SESSION.get() or None, {
+                "type": "wait", "reason": "rate", "attempt": i + 1, "tries": CONTENTION_TRIES,
+                "seconds": round(wait)})
             await asyncio.sleep(wait)
     raise AssertionError("unreachable")
 

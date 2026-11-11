@@ -151,7 +151,7 @@ config.load().setdefault("agent", {})["baseUrl"] = "https://aiplatform.googleapi
 said = session._explain(ModelHTTPError(429, "google/gemini-x", vertex))
 check("a 429 says rate limit", "요청 한도" in said, said)
 check("and quotes the provider's sentence", "Resource exhausted" in said, said)
-check("and on Vertex points at the quota", "Vertex 할당량" in said, said)
+check("and on Vertex says it is shared capacity, not a fixed quota", "공유 용량" in said, said)
 said = session._explain(ModelHTTPError(400, "m", {"error": {"message": "input token count 1429000 exceeds the limit"}}))
 check("a 400 whose body holds 429 digits is not a rate limit", "요청 한도" not in said, said)
 said = session._explain(ModelHTTPError(400, "m", {"error": {"message": "key 401 chars"}}))
@@ -227,6 +227,78 @@ try:
     except _openai.APIStatusError:
         pass
     check("a plain out-of-credit 402 is not retried", len(_calls) == 1, str(_calls))
+
+    print("\ntest_vertex_429_backs_off_and_retries (§1-128)")
+    import json as _json
+    from app import providers as _prov
+    VERTEX = "https://aiplatform.googleapis.com/v1/projects/p/locations/global/endpoints/openapi"
+    _bodies: list[dict] = []
+    _plan: list[int] = []  # statuses to answer with, in order; then 200
+
+    def _handler(req: _httpx.Request) -> _httpx.Response:
+        _bodies.append(_json.loads(req.content))
+        if _plan:
+            code = _plan.pop(0)
+            msg = ("Quota exceeded for aiplatform.googleapis.com/generate_content_requests_per_day"
+                   if code == 4290 else "Resource exhausted, please try again later.")
+            return _httpx.Response(429, json=[{"error": {"code": 429, "message": msg, "status": "RESOURCE_EXHAUSTED"}}])
+        return _httpx.Response(200, json={
+            "id": "x", "object": "chat.completion", "created": 0, "model": "google/gemini-3.8-pro",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]})
+
+    async def _call(base: str) -> str:
+        c = _agent._client(base, "tok", set(), 30.0)
+        c.max_retries = 0  # the SDK's own short retries are not what is under test
+        c._client = _httpx.AsyncClient(transport=_httpx.MockTransport(_handler))
+        r = await c.chat.completions.create(model="google/gemini-3.8-pro",
+                                            messages=[{"role": "user", "content": "hi"}], prompt_cache_key="k1")
+        return r.choices[0].message.content
+
+    _slept.clear()
+    _plan[:] = [429, 429]
+    tok = _prov.CURRENT_SESSION.set("sess-429")
+    try:
+        got = _aio.run(_call(VERTEX))
+    finally:
+        _prov.CURRENT_SESSION.reset(tok)
+    check("a Vertex 429 is retried until it clears", got == "ok" and len(_bodies) == 3, str(len(_bodies)))
+    check("the same request each time (cache keeps hitting)", all(b == _bodies[0] for b in _bodies))
+    check("with growing waits, the first about 5s", len(_slept) == 2 and 4 <= _slept[0] <= 6 and 8 <= _slept[1] <= 12,
+          str(_slept))
+    waits = [e for e in session._drain_extra("sess-429") if e.get("type") == "wait"]
+    check("the panel hears about each wait", [w["attempt"] for w in waits] == [1, 2]
+          and waits[0]["tries"] == _agent.CONTENTION_TRIES and waits[0]["seconds"] >= 4, str(waits))
+
+    _bodies.clear(); _slept.clear()
+    _plan[:] = [429] * (_agent.CONTENTION_TRIES + 1)
+    try:
+        _aio.run(_call(VERTEX))
+        check("it gives up after the last try", False)
+    except _openai.APIStatusError as e:
+        check("it gives up after the last try", e.status_code == 429 and len(_bodies) == _agent.CONTENTION_TRIES + 1,
+              str(len(_bodies)))
+    check("and never waits more than the cap", max(_slept) <= _agent.CONTENTION_WAIT_MAX_S * 1.2 + 0.01, str(_slept))
+
+    for label, base, plan in (("a per-day quota 429 is not waited on", VERTEX, [4290]),
+                              ("a non-Vertex 429 is left to the SDK", "https://openrouter.ai/api/v1", [429])):
+        _bodies.clear(); _slept.clear(); _plan[:] = plan
+        try:
+            _aio.run(_call(base))
+            check(label, False)
+        except _openai.APIStatusError:
+            check(label, len(_bodies) == 1 and not _slept, str(len(_bodies)))
+    _plan.clear()
+
+    adv = session.vertex_429_advice(VERTEX.replace("/global/", "/asia-northeast3/"), "google/gemini-3.8-pro")
+    check("a single region is named and global suggested", "asia-northeast3" in adv and "단일 리전" in adv
+          and "'global'" in adv, adv)
+    adv = session.vertex_429_advice(VERTEX.replace("/global/", "/us/"), "google/gemini-3.8-pro")
+    check("a multi-region is called that", "멀티 리전" in adv, adv)
+    adv = session.vertex_429_advice(VERTEX, "google/gemini-4-pro-preview-11-2026")
+    check("on global, no region tip; a preview model is named", "리전이" not in adv and "프리뷰" in adv, adv)
+    config.load()["agent"]["baseUrl"] = VERTEX.replace("/global/", "/us-central1/")
+    said = session._explain(ModelHTTPError(429, "google/gemini-3.8-pro", None))
+    check("the 429 explanation carries the Vertex advice", "us-central1" in said and "계속 이어서" in said, said)
 finally:
     _aio.sleep = _real_sleep
 config.load()["agent"]["baseUrl"] = ""

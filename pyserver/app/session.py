@@ -16,6 +16,7 @@ import dataclasses
 
 import asyncio
 import json
+import re
 import threading
 import time
 import uuid
@@ -425,6 +426,7 @@ SCREEN_MODES = ("chat", "bot", "studio", "persona")
 # translated event (landing the line right after its toolResult) and once
 # more before done. The wire vocabulary stays exactly:
 #   start | text | tool | toolResult | artifact | images | open | viewed | suggestions | done | error
+# `wait` (§1-128) says the model call is being retried after a Vertex 429.
 # `viewed` (§1-42) is what the agent LOOKED at through a vision tool - a small
 # strip, no file-tab bump; `suggestions` says review verdicts were written
 # into a folder's selection file, and the panel reloads the 검수 tab.
@@ -1012,6 +1014,28 @@ def _explain_402(body: Any, low: str, limit: Any) -> str:
             + (f"\n(제공자 메시지: {said[:300]})" if said else ""))
 
 
+def vertex_429_advice(base: str, model: str) -> str:
+    """What to change after Vertex kept saying 429 through Hina's own waits
+    (§1-128). Google: a 429 there is shared-capacity contention, not a fixed
+    quota; the global endpoint pools capacity worldwide and is the least
+    likely to 429, a multi-region one (us, eu) less so, a single region the
+    most. Preview models sit outside the usage tiers. Usage tiers are set per
+    organisation, so another key or project of the same account does not help."""
+    m = re.search(r"/locations/([^/]+)/", base or "")
+    loc = (m.group(1) if m else "global").lower()
+    tips: list[str] = []
+    if loc != "global":
+        kind = "멀티 리전" if loc in ("us", "eu") else "단일 리전"
+        tips.append(f"지금 리전이 '{loc}'({kind})입니다. ⚙ → AI 에이전트에서 프리셋을 편집해 'Vertex 리전'을 'global'로 바꾸면 "
+                    "구글이 전 세계 용량을 묶어 배분해 429가 크게 줄어듭니다(구글 권장).")
+    if "preview" in (model or "").lower():
+        tips.append(f"'{model}'은 프리뷰 모델이라 공유 용량이 작습니다. 정식(GA) 모델로 바꾸면 덜 걸립니다.")
+    tips.append("요청당 입력이 클수록 붐빌 때 밀리기 쉬우니, 반복되면 새 대화로 시작하거나 "
+                "⚙ → 에이전트 → 자동 요약 기준을 낮춰 주세요.")
+    return ("\n→ Vertex 의 429는 고정 할당량이 아니라 공유 용량이 순간적으로 붐빈다는 뜻입니다. "
+            "Hina가 간격을 늘려 가며 자동으로 다시 보냈지만 계속 붐볐습니다.\n- " + "\n- ".join(tips))
+
+
 def _explain_429(body: Any) -> str:
     """429 after the SDK's own retries. On Vertex it is a quota, not a burst:
     the same session failed again 14 minutes later in the report that led
@@ -1023,9 +1047,7 @@ def _explain_429(body: Any) -> str:
         out += f"\n제공자 응답: {said[:300]}"
     base = (config.section("agent").get("baseUrl") or "").lower()
     if "aiplatform.googleapis.com" in base:
-        out += ("\n→ Vertex 할당량(분당 입력 토큰·프리뷰 모델 공유 할당량) 문제일 가능성이 큽니다. "
-                "몇 분 뒤에도 반복되면 새 대화로 요청당 입력을 줄이거나(⚙ → 에이전트 → 자동 요약 기준), "
-                "GCP 콘솔의 Vertex AI 할당량을 확인해 주세요.")
+        out += vertex_429_advice(base, str(config.section("agent").get("model") or ""))
     else:
         out += " 잠시 후 다시 시도해 주세요. 계속되면 새 대화로 요청당 입력을 줄여 보세요."
     return out

@@ -34,6 +34,43 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-129 (2026-11-11): `setup.bat -Service` without admin or NSSM still leaves a running server
+
+- **Report (community):** a user's backend was not running after a reboot (`127.0.0.1:6020` refused); the answer was
+  `setup.bat -Service`, which raised the question of what it does on a PC without admin rights or NSSM.
+- **Before:** the whole install ran, then `Install-Service` threw on the first missing thing - admin first, NSSM
+  only on the next try - and `-Service` had skipped the ordinary start, so the user was left with nothing listening.
+- **Fix (`manage.ps1`):** with `-Service`, an existing `RisuHina` service still fails at once (a hand-started server
+  would fight it for the port); otherwise admin and NSSM are checked together before installing, every missing one
+  is listed with its fix, the install goes on and the server starts the ordinary way, a closing notice says it will
+  not survive a reboot, and the script exits 2 (what was asked for did not happen). A later `setup.bat -Service`
+  stops the hand-started server before the service starts.
+- Verified: a copy of the install in a path with a space, non-admin and no NSSM: both missing items listed, `/health`
+  up on the test port, exit 2. Not run: the service take-over (needs admin and NSSM).
+
+## §1-128 (2026-11-11): a Vertex 429 is waited out and retried, and the explanation names the endpoint
+
+- **Reports (community, mostly Vertex):** turns failing with 429 again and again; the question was whether rolling
+  several API keys would spread the load.
+- **Why rolling keys does not help:** Google's docs (Standard PayGo / error 429, pasted by the user): a 429 on Vertex
+  does not mean a fixed quota was reached but "transient high contention for a shared resource", to be handled with
+  exponential backoff; usage tiers apply per organisation, and preview models sit outside them. Another key or
+  project of the same account shares the same capacity, and a different project starts its prompt cache from zero.
+  The endpoint matters: global pools capacity worldwide (recommended, least 429), a multi-region one (us, eu) less,
+  a single region (us-central1, asia-northeast3) is the most likely to 429.
+- **Before:** only the SDK's own two retries (a few seconds in all), then the explanation.
+- **Fix:** `agent._contention_retry` wraps the Vertex client's `create`: a 429 is retried with waits of
+  5 / 10 / 20 / 40 / 40 s (+-20% jitter, cap 40 s, Retry-After honoured if larger), the same request each time so
+  the cache keeps hitting; a 429 that names a per-day quota is not waited on. Each wait goes to the panel as a
+  `wait` stream event ("모델 서버가 붐빕니다(429) · 약 N초 뒤 다시 보냅니다 (n/5)", then "다시 보냈습니다 ·
+  응답을 기다리는 중입니다…" once the wait is over). An older panel ignores the event. If it still fails,
+  `session.vertex_429_advice` says it is shared capacity, names a non-global region and suggests 'global', names a
+  preview model, and suggests a smaller request.
+- Verified: `tests/test_stream_events.py` (gate) - mock transport through the agent's own client: 429 twice then
+  200 succeeds with identical requests, waits ~5 s then ~10 s, two `wait` events on the session; gives up after the
+  last try; a per-day 429 and a non-Vertex 429 are not retried here; advice for a single region, a multi-region,
+  global + preview. Not checked against live Vertex contention.
+
 ## §1-127 (2026-11-05): OpenCode Go/Zen get `x-opencode-session` on their own
 
 - **Report (community):** an OpenCode Go key failed the connection test with HTTP 400 `MissingSessionID` ("Request is

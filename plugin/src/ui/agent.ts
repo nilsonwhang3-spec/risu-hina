@@ -1083,6 +1083,17 @@ export class AgentPanel {
             quietTimer = setTimeout(() => { quietTimer = null; setThinking(true, '다음 단계를 준비하는 중입니다…'); }, 2500);
             break;
           }
+          case 'wait': {
+            // The backend is waiting out a Vertex 429 before sending the same
+            // request again (§1-128): say so, or the turn looks frozen.
+            const n = Number(e.attempt ?? 0), of = Number(e.tries ?? 0), s = Number(e.seconds ?? 0);
+            setThinking(true, `모델 서버가 붐빕니다(429) · 약 ${s}초 뒤 다시 보냅니다 (${n}/${of})`);
+            // A model that thinks before its first token stays silent after
+            // the resend; the countdown line must not outlive the wait.
+            quietTimer = setTimeout(() => { quietTimer = null; setThinking(true, `다시 보냈습니다 (${n}/${of}) · 응답을 기다리는 중입니다…`); }, Math.max(1, s) * 1000);
+            this.scroll();
+            break;
+          }
           case 'toolDraft': {
             // The model is still writing a tool call's arguments (§1-103):
             // no card can exist until it finishes, so say how far it got.
