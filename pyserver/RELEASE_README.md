@@ -180,6 +180,8 @@ setup.bat -Service              관리자 PowerShell 에서
 
 `RisuHina` 라는 서비스가 생기고(자동 시작), `cmd.exe /c start.bat 6020` 을 돌린다. 프로세스가 죽으면 5초 뒤 다시 띄운다.
 
+관리자 권한이나 NSSM 이 없으면 빠진 것을 설치 전에 한꺼번에 알려 주고, 설치는 그대로 마친 뒤 **일반 방식으로 띄워 둔다**(재부팅하면 꺼진다, 종료 코드 2). 갖춘 뒤 `setup.bat -Service` 를 다시 돌리면 손으로 띄운 서버를 멈추고 서비스가 넘겨받는다.
+
 ```
 nssm status RisuHina
 nssm stop RisuHina  /  nssm start RisuHina  /  nssm restart RisuHina

@@ -134,7 +134,39 @@ function Test-Admin {
         ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-ServiceBlockers {
+    # Everything -Service needs that this machine lacks, all at once. Checked
+    # one at a time inside Install-Service, a user without admin and without
+    # NSSM failed twice - and only after the whole install had run each time.
+    $missing = @()
+    if (-not (Test-Admin)) {
+        $missing += 'an elevated prompt: right-click PowerShell, "Run as administrator", and run setup.bat -Service there.'
+    }
+    if (-not (Find-Nssm)) {
+        $missing += 'nssm.exe: winget install NSSM.NSSM (or choco install nssm, or https://nssm.cc), then open a NEW prompt so it is on PATH.'
+    }
+    return $missing
+}
+
+$script:ServiceSkipped = $false
+
 function Invoke-Setup {
+    # Fail fast on the one case a fallback would make worse: a registered
+    # service is (or will be) holding the port, so starting a second server by
+    # hand would only collide with it.
+    $blockers = @()
+    if ($Service) {
+        if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
+            throw "a service called $Name already exists. Remove it first: uninstall.bat"
+        }
+        $blockers = @(Get-ServiceBlockers)
+        if ($blockers.Count -gt 0) {
+            Write-Output 'setup: -Service cannot be done on this machine yet. Missing:'
+            foreach ($b in $blockers) { Write-Output ('         - ' + $b) }
+            Write-Output '       Installing anyway and starting it the ordinary way, so it works today.'
+        }
+    }
+
     # Same reason start.bat clears it: a stray PYTHONHOME points the bundled
     # interpreter at someone else's stdlib and it dies before printing a
     # useful word. (The ._pth already neutralises PYTHONPATH.)
@@ -172,9 +204,20 @@ function Invoke-Setup {
     }
     Write-Output ("setup: data dir {0}" -f $target)
 
-    if ($Service) { Install-Service }
+    # A -Service that cannot be honoured still leaves a running server: the
+    # alternative was an install that ended with nothing listening, which the
+    # plugin reports as "backend unreachable" and nothing more.
+    $asService = $Service -and ($blockers.Count -eq 0)
+    if ($Service -and -not $asService) { $script:ServiceSkipped = $true }
+    if ($asService) { Install-Service }
     elseif (-not $NoStart) { Start-Server }
     if ($Service -or (-not $NoStart)) { Get-Status; Show-Token }
+    if ($script:ServiceSkipped) {
+        Write-Output ''
+        Write-Output 'setup: NOT registered as a service. The server is running now but will not'
+        Write-Output '       come back after a reboot. Fix what is listed above, then run'
+        Write-Output '       setup.bat -Service again; it takes over from this one.'
+    }
 }
 
 function Start-Server {
@@ -262,6 +305,13 @@ supervisor.
         throw "a service called $Name already exists. Remove it first: uninstall.bat"
     }
     Write-Output ("service: using {0}" -f $exe)
+    # A server started by hand (or by an earlier setup whose -Service fell
+    # back) holds the port; the service would start, fail to bind and loop.
+    if (@(Get-ServerProcesses).Count -gt 0) {
+        Write-Output 'service: stopping the server that was started by hand'
+        Stop-Server
+        Start-Sleep -Seconds 1
+    }
 
     # cmd.exe with AppDirectory set, and a bare relative start.bat: a path with
     # a space would otherwise need quoting that has to survive nssm, the service
@@ -413,6 +463,14 @@ try {
 }
 if ($pause) {
     Write-Host ''
-    Write-Host 'Done. Press Enter to close this window.'
+    if ($script:ServiceSkipped) {
+        Write-Host 'Done, but WITHOUT the service - see above.' -ForegroundColor Yellow
+        Write-Host 'Press Enter to close this window.'
+    } else {
+        Write-Host 'Done. Press Enter to close this window.'
+    }
     [void](Read-Host)
 }
+# What was asked for did not happen, even though the server is up: a script
+# driving setup -Service must not read this as success.
+if ($script:ServiceSkipped) { exit 2 }
