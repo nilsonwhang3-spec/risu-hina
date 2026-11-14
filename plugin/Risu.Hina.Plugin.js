@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.58
+//@display-name Risu Hina v0.15.59
 //@api 3.0
-//@version 0.15.58
+//@version 0.15.59
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -284,7 +284,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.58", String(body.version || ""));
+          this.gate = versionGate("0.15.59", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -18586,7 +18586,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       diag = null;
     }
     const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
-    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.58"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.59"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
     const health = state.health ?? {};
     lines.push("\uD658\uACBD: " + [
       `RisuAI ${transport.hostPlatform || "?"}`,
@@ -18710,10 +18710,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.58";
+          const mismatch = r.current !== "0.15.59";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.58"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.59"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18806,7 +18806,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.58",
+            version: "0.15.59",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -20243,7 +20243,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.58"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.59"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -20454,12 +20454,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const fullWord = el("input", { type: "checkbox" });
     fullWord.checked = v.fullWordMatching;
     const depth = el("input", { type: "number", min: "0", max: "20", value: String(v.scanDepth) });
-    const budget = el("input", { type: "number", min: "0", max: "4096", value: String(v.tokenBudget) });
+    const budget = el("input", { type: "number", min: "0", max: "999999", value: String(v.tokenBudget) });
     const own = el("div", { class: "card", style: { marginTop: "8px" } }, [
       el("label", { class: "field row" }, [recursive, el("span", { text: "\uC7AC\uADC0 \uAC80\uC0C9 (recursiveScanning)" })]),
       el("label", { class: "field row" }, [fullWord, el("span", { text: "\uC804\uCCB4 \uB2E8\uC5B4 \uC77C\uCE58 (fullWordMatching)" })]),
       el("label", { class: "field" }, [el("span", { text: "\uC2A4\uCE94 \uAE4A\uC774 (scanDepth, 0\u201320)" }), depth]),
-      el("label", { class: "field" }, [el("span", { text: "\uD1A0\uD070 \uC608\uC0B0 (tokenBudget, 0\u20134096)" }), budget])
+      el("label", { class: "field" }, [el("span", { text: "\uD1A0\uD070 \uC608\uC0B0 (tokenBudget, 0\u2013999999)" }), budget])
     ]);
     const sync = () => {
       own.hidden = useGlobal.checked;
@@ -20475,7 +20475,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       recursiveScanning: recursive.checked,
       fullWordMatching: fullWord.checked,
       scanDepth: clamp(depth, 0, 20, LORE_SETTINGS_DEFAULTS.scanDepth),
-      tokenBudget: clamp(budget, 0, 4096, LORE_SETTINGS_DEFAULTS.tokenBudget)
+      tokenBudget: clamp(budget, 0, 999999, LORE_SETTINGS_DEFAULTS.tokenBudget)
     }), save));
     clear(viewMount3);
     viewMount3.appendChild(el("div", { class: "card" }, [
@@ -28331,14 +28331,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.58"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.59"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.58", h.version, h.installKind);
+      const behind = backendBehind("0.15.59", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28439,7 +28439,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.58" }),
+        el("span", { class: "dim", text: "v0.15.59" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28801,6 +28801,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.58"} loaded`);
+    console.log(`[risu-hina] v${"0.15.59"} loaded`);
   })();
 })();

@@ -1834,7 +1834,7 @@ def build(model: Any = None) -> Agent[Deps]:
         use_global=True switches the bot back to the global settings (RisuAI's "글로벌 설정 사용";
         the other arguments are then ignored). Otherwise the bot gets its own settings:
         recursive_scanning (재귀 검색), full_word_matching (전체 단어 일치), scan_depth (0-20, -1 keeps
-        the current or RisuAI's default 5), token_budget (0-4096, -1 keeps the current or 800).
+        the current or RisuAI's default 5), token_budget (0-999999, -1 keeps the current or 800).
         A typical release turns recursive scanning OFF and uses the bot's own settings.
         """
         row = _typed_row(ctx, cardmod.LORE_SETTINGS_FIELD)
@@ -1848,7 +1848,7 @@ def build(model: Any = None) -> Agent[Deps]:
             new = {"recursiveScanning": bool(recursive_scanning),
                    "fullWordMatching": bool(full_word_matching),
                    "scanDepth": cur["scanDepth"] if int(scan_depth) < 0 else max(0, min(20, int(scan_depth))),
-                   "tokenBudget": cur["tokenBudget"] if int(token_budget) < 0 else max(0, min(4096, int(token_budget)))}
+                   "tokenBudget": cur["tokenBudget"] if int(token_budget) < 0 else max(0, min(999999, int(token_budget)))}
             body = cardmod.encode_lore_settings(new)
             what = (f"봇 설정: 재귀 검색 {'켬' if new['recursiveScanning'] else '끔'} · "
                     f"전체 단어 {'켬' if new['fullWordMatching'] else '끔'} · 깊이 {new['scanDepth']} · 토큰 {new['tokenBudget']}")

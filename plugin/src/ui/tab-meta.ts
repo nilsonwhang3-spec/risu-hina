@@ -245,12 +245,12 @@ function openLoreSettings(f: CardField): void {
   const fullWord = el('input', { type: 'checkbox' }) as HTMLInputElement;
   fullWord.checked = v.fullWordMatching;
   const depth = el('input', { type: 'number', min: '0', max: '20', value: String(v.scanDepth) }) as HTMLInputElement;
-  const budget = el('input', { type: 'number', min: '0', max: '4096', value: String(v.tokenBudget) }) as HTMLInputElement;
+  const budget = el('input', { type: 'number', min: '0', max: '999999', value: String(v.tokenBudget) }) as HTMLInputElement;
   const own = el('div', { class: 'card', style: { marginTop: '8px' } }, [
     el('label', { class: 'field row' }, [recursive, el('span', { text: '재귀 검색 (recursiveScanning)' })]),
     el('label', { class: 'field row' }, [fullWord, el('span', { text: '전체 단어 일치 (fullWordMatching)' })]),
     el('label', { class: 'field' }, [el('span', { text: '스캔 깊이 (scanDepth, 0–20)' }), depth]),
-    el('label', { class: 'field' }, [el('span', { text: '토큰 예산 (tokenBudget, 0–4096)' }), budget]),
+    el('label', { class: 'field' }, [el('span', { text: '토큰 예산 (tokenBudget, 0–999999)' }), budget]),
   ]);
   const sync = (): void => { own.hidden = useGlobal.checked; };
   useGlobal.addEventListener('change', sync);
@@ -263,7 +263,7 @@ function openLoreSettings(f: CardField): void {
   save.addEventListener('click', () => void saveTyped(f, useGlobal.checked ? '' : encodeLoreSettings({
     recursiveScanning: recursive.checked, fullWordMatching: fullWord.checked,
     scanDepth: clamp(depth, 0, 20, LORE_SETTINGS_DEFAULTS.scanDepth),
-    tokenBudget: clamp(budget, 0, 4096, LORE_SETTINGS_DEFAULTS.tokenBudget),
+    tokenBudget: clamp(budget, 0, 999999, LORE_SETTINGS_DEFAULTS.tokenBudget),
   }), save));
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [

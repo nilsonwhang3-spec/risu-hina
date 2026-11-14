@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-11-11 (v0.15.58, Risu Hina)
+# 06. Implementation status — as of 2026-11-15 (v0.15.59, Risu Hina)
+
+## 0.15.59 (2026-11-15): §1-130 the lorebook token budget goes up to 999999; saving 메타정보 no longer cuts it to 4096
 
 ## 0.15.58 (2026-11-11): §1-128 a Vertex 429 is waited out and retried, and names the endpoint; §1-129 setup.bat -Service without admin or NSSM still starts the server; a ChatGPT-plan limit mid-stream is explained
 
@@ -35,6 +37,17 @@
 ## 0.15.42 (2026-10-12): §1-106 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
+
+## §1-130 (2026-11-15): the lorebook token budget goes up to 999999; saving 메타정보 no longer cuts it to 4096
+
+- **Report (user):** bots that need a large lorebook budget set `tokenBudget` to 99999 or more in RisuAI; the
+  메타정보 tab capped it at 4096.
+- **Before:** the 로어북 설정 form had `max=4096` and its save clamped to 0-4096, so saving the form with a
+  99999 budget already on the card silently wrote 4096 back. `propose_lore_settings` clamped the same way.
+- **Fix:** the form (`plugin/src/ui/tab-meta.ts`) and `propose_lore_settings` (`pyserver/app/agent.py`) take
+  0-999999. Reading and writing the card (`card.py`, `cardfields.ts`) never clamped.
+- Verified: typecheck and build; the test server served the new bundle (`clamp(budget, 0, 999999`) and the new
+  `agent.py` on 0.15.58 before the release. Not run: saving 999999 from the panel in RisuAI.
 
 ## §1-129 (2026-11-11): `setup.bat -Service` without admin or NSSM still leaves a running server
 
