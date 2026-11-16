@@ -185,6 +185,8 @@ def h_health(arg: dict) -> dict:
         # The agent runs on the user's ChatGPT plan: the panel says so by the
         # composer, with the usage link (SIWC UI guidelines).
         "chatgptPlan": (config.section("agent").get("provider") or "") == "codex",
+        # The agent runs on GitHub Copilot: the panel shows its quotas by the composer.
+        "copilot": "githubcopilot.com" in str(config.section("agent").get("baseUrl") or "").lower(),
         "workspaces": len(workspace.list_all()),
         "space": str(workspace.space_root()),
         # Cheap flags only: /health is polled. /mcp/status has the detail.
@@ -1707,6 +1709,32 @@ def h_codex_login_complete(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def h_copilot_login_start(arg: dict) -> dict:
+    from . import copilotauth
+    try:
+        return copilotauth.start_login()
+    except copilotauth.CopilotError as e:
+        raise ApiError(400, str(e))
+
+
+def h_copilot_usage(arg: dict) -> dict:
+    """Quotas of the GitHub account the general agent's Copilot key belongs to."""
+    from . import copilotauth
+    a = config.section("agent")
+    key = str(a.get("apiKey") or "").strip()
+    if not (copilotauth.is_copilot(str(a.get("baseUrl") or "")) and copilotauth.is_github_token(key)):
+        raise ApiError(400, "지금 에이전트가 GitHub Copilot 키를 쓰고 있지 않습니다")
+    try:
+        return copilotauth.usage(key, force=str(arg.get("force") or "") in ("1", "true"))
+    except copilotauth.CopilotError as e:
+        raise ApiError(502, str(e))
+
+
+def h_copilot_login_status(arg: dict) -> dict:
+    from . import copilotauth
+    return copilotauth.login_status(str(arg.get("state") or ""))
+
+
 def h_codex_logout(arg: dict) -> dict:
     return codexauth.logout()
 
@@ -3053,6 +3081,9 @@ ROUTES: dict[str, Handler] = {
     "POST /codex/login/complete": h_codex_login_complete,
     "POST /codex/logout": h_codex_logout,
     "POST /codex/welcome": h_codex_welcome,
+    "POST /copilot/login/start": h_copilot_login_start,
+    "GET /copilot/login/status": h_copilot_login_status,
+    "GET /copilot/usage": h_copilot_usage,
     "GET /permits": h_permits,
     "POST /permits/decide": h_permit_decide,
     "POST /presets/select": h_preset_select,

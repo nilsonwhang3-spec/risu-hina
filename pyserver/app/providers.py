@@ -173,6 +173,28 @@ PROFILES: list[dict[str, Any]] = [
         "docs": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library",
     },
     {
+        "id": "github-copilot",
+        "name": "GitHub Copilot",
+        "api": "https://api.githubcopilot.com",
+        "hosts": ["githubcopilot.com"],
+        "auth": "GitHub 로그인(기기 코드 8자리) — 키 칸 대신 'GitHub 로그인' 버튼. Hina가 요청마다 Copilot 토큰을 자동 발급·갱신합니다.",
+        "modelExample": "gpt-4.1, claude-sonnet-4, gemini-2.5-pro",
+        "endpoint": "chat",
+        "capField": "max_tokens",
+        "strictTools": False,
+        "unsupported": ["prompt_cache_key", "prompt_cache_retention", "service_tier", "store"],
+        "modelRules": [
+            {"prefix": ["gpt-5-codex", "gpt-5.1-codex", "gpt-5.2-codex", "codex-", "mai-code"], "unsupported": [], "endpoint": "responses",
+             "note": "codex·mai-code 계열 모델은 Copilot 에서 /responses 로만 답합니다 (자동 전환)."},
+        ],
+        "template": {},
+        "editorHeaders": True,
+        "note": "GitHub Copilot 구독(무료 플랜 포함)의 모델을 씁니다. 모델은 github.com/settings/copilot 에서 켜져 있어야 하고, "
+                "프리미엄 모델은 월 프리미엄 요청 한도를 씁니다(툴 왕복은 X-Initiator: agent 로 표시합니다). "
+                "GitHub 편집기 밖에서 Copilot 을 쓰는 것은 GitHub 약관상 회색지대이므로 자신의 책임 하에 사용해 주세요. 웹 검색은 제공하지 않습니다.",
+        "docs": "https://docs.github.com/copilot/concepts/billing/copilot-requests",
+    },
+    {
         "id": "vercel",
         "name": "Vercel AI Gateway",
         "api": "https://ai-gateway.vercel.sh/v1",
@@ -454,6 +476,9 @@ def auto_headers(base_url: str, session: str = "") -> dict[str, str]:
         out["User-Agent"] = f"{config.APP_NAME}/{config.VERSION}"
     if p.get("sessionHeader"):
         out[str(p["sessionHeader"])] = session_id(session)
+    if p.get("editorHeaders"):
+        from . import copilotauth
+        out.update(copilotauth.EDITOR_HEADERS)
     return out
 
 
@@ -779,6 +804,13 @@ def hint(text: str, section_label: str = "에이전트") -> str:
             or "is not accessible via the /chat/completions endpoint" in low):
         return (f"이 모델은 Chat Completions 에서 툴 호출을 거부합니다. {where} 에 "
                 '{"api": "responses"} 를 넣어 Responses API 로 보내세요 (또는 {"reasoning_effort": "none"}).')
+    if "model_not_supported" in low or "requested model is not supported" in low:
+        # GitHub Copilot (2026-11-16 report): the model exists but the
+        # account's Copilot policy has it disabled, or the id is not Copilot's.
+        return ("이 계정에서 쓸 수 없는 모델입니다. GitHub Copilot 이면 대개 플랜 문제입니다 — Copilot Free 에서는 "
+                "Gemini·Claude Sonnet/Opus 같은 프리미엄 모델이 꺼져 있고 켜는 설정도 없습니다(Pro 이상 필요). "
+                "Pro 이상이면 github.com/settings/copilot 에서 그 모델을 켜 주세요. 모델 이름은 Copilot 의 id 를 "
+                "그대로 써야 합니다 (Free 에서도 되는 예: gpt-4.1, claude-haiku-4.5, gpt-6-luna).")
     if "malformed publisher model" in low or "expected '<publisher>/<model>'" in low:
         return ("Vertex 는 모델을 '<publisher>/<model>' 로 받습니다 (예: google/gemini-2.5-flash). "
                 f"설정 → {section_label} → 프리셋 수정 → 모델 이름 앞에 publisher 를 붙여 주세요.")

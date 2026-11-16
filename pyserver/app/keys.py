@@ -83,6 +83,22 @@ def save(values: dict, key_id: str | None = None) -> dict:
         info = vertexauth.service_account_info(api_key)
         region = str(values.get("region") or "global").strip() or "global"
         base_url = vertexauth.base_url(str(info["project_id"]), region)
+    if provider.lower() in ("github-copilot", "copilot", "github copilot"):
+        # The key is a GitHub token from the device login (copilotauth); the
+        # form sends the login's state, never the token, and the account's
+        # Copilot host (individual / business / enterprise) becomes the URL.
+        from . import copilotauth
+        provider = "github-copilot"
+        if api_key.startswith(copilotauth.CLAIM_PREFIX):
+            try:
+                api_key, base_url, login = copilotauth.claim(api_key[len(copilotauth.CLAIM_PREFIX):])
+            except copilotauth.CopilotError as e:
+                raise KeyError_(str(e)) from None
+            if login and not str(values.get("note") or "").strip():
+                values = {**values, "note": f"GitHub {login}"}
+        if not api_key:
+            raise KeyError_("GitHub 로그인을 먼저 해 주세요 (기기 코드)")
+        base_url = base_url or (previous or {}).get("baseUrl") or copilotauth.DEFAULT_API
     if not base_url and provider:
         # The provider names the endpoint: models.dev knows the OpenAI-
         # compatible base for most, so the page asks for a provider, not a URL.
@@ -129,6 +145,9 @@ def runtime(base_url: str, api_key: str) -> tuple[str, str]:
     if "aiplatform.googleapis.com" in (base_url or "").lower() and (api_key or "").lstrip().startswith("{"):
         from . import vertexauth
         return base_url, vertexauth.access_token(api_key)
+    from . import copilotauth
+    if copilotauth.is_copilot(base_url) and copilotauth.is_github_token(api_key):
+        return base_url, copilotauth.access_token(api_key.strip())
     return base_url, api_key
 
 
@@ -155,8 +174,15 @@ def client_key(base_url: str, api_key: str) -> Any:
     base_url, token = runtime(base_url, api_key)
     if token == api_key:
         return api_key
-    from . import vertexauth
+    from . import copilotauth, vertexauth
+    # Both exchanges cache and renew ahead of expiry, so per request is cheap.
+    if copilotauth.is_copilot(base_url):
+        def swap() -> str:
+            return copilotauth.access_token(api_key.strip())
+    else:
+        def swap() -> str:
+            return vertexauth.access_token(api_key)
 
     async def fresh() -> str:
-        return await asyncio.to_thread(vertexauth.access_token, api_key)
+        return await asyncio.to_thread(swap)
     return fresh

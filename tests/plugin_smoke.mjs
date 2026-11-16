@@ -2079,6 +2079,25 @@ console.log('\ntest_agent_panel');
   const heads = [...document.querySelectorAll('.agenthead button')].map((b) => b.textContent);
   check('new-conversation control is labelled', heads.includes('새 대화'), String(heads));
   check('history control is labelled', heads.includes('이전 대화'), String(heads));
+  // 자동 승인 및 반영: a Manual/Auto toggle beside 실행 모드, Manual by default.
+  check('approval mode toggle sits after the run-mode button, Manual first',
+    heads.indexOf('Manual 승인') === heads.indexOf('실행 모드') + 1, String(heads));
+  // The toggle has to toggle even where localStorage refuses writes (the 2026-11-16
+  // report: the note appeared, the button stayed Manual).
+  {
+    const tog = document.querySelector('.agenthead .autotoggle');
+    const realSet = window.localStorage?.setItem;
+    try { if (window.localStorage) window.localStorage.setItem = () => { throw new Error('blocked'); }; } catch { /* linkedom */ }
+    tog?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(100);
+    check('approval toggle turns to "Auto 모드 On", marked on', tog?.textContent === 'Auto 모드 On' && tog.classList.contains('on'),
+      String(tog?.textContent));
+    check('turning Auto on writes the guidance into the conversation', /Auto 모드 On \(이 대화만\)/.test(document.querySelector('.agentlog')?.textContent || ''));
+    tog?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(100);
+    check('and back to Manual', tog?.textContent === 'Manual 승인' && !tog.classList.contains('on'), String(tog?.textContent));
+    try { if (window.localStorage && realSet) window.localStorage.setItem = realSet; } catch { /* linkedom */ }
+  }
 
   // A staged proposal must read as a proposal: preview in the turn list,
   // and the transcript untouched until approval.

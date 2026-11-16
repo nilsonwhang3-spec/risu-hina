@@ -479,7 +479,7 @@ function buildKeysCard(): HTMLElement {
     // case that needs the URL, behind 직접 지정.
     const name = el('input', { value: existing?.name ?? '', placeholder: '이름 (확인용, 예: 내 Gemini 키)' }) as HTMLInputElement;
     const provider = el('input', { value: existing?.provider ?? '', placeholder: '프로바이더 (예: google, openai, openrouter, vercel)', list: 'hina-providers' }) as HTMLInputElement;
-    const providerList = el('datalist', { id: 'hina-providers' }, ['google', 'openai', 'anthropic', 'openrouter', 'vercel', 'groq', 'deepseek', 'xai', 'mistral', 'ollama']
+    const providerList = el('datalist', { id: 'hina-providers' }, ['google', 'openai', 'anthropic', 'openrouter', 'vercel', 'github-copilot', 'groq', 'deepseek', 'xai', 'mistral', 'ollama']
       .map((p) => el('option', { value: p })));
     // What the chosen provider expects - its URL, how the key travels, its
     // quirks - from the backend's profile table, so the form says it before
@@ -491,6 +491,10 @@ function buildKeysCard(): HTMLElement {
       const p = want ? profiles.find((x) => x.id === want || x.name.toLowerCase() === want
         || x.hosts.some((h) => want.includes(h))) : null;
       const vertex = p?.id === 'vertex' || ['vertex', 'vertex ai', 'vertexai'].includes(want);
+      copilot = p?.id === 'github-copilot' || ['copilot', 'github copilot', 'github-copilot'].includes(want);
+      keyRow.style.display = copilot ? 'none' : '';
+      ghBox.style.display = copilot ? '' : 'none';
+      if (copilot && !name.value.trim()) name.value = 'GitHub Copilot';
       clear(provNote);
       provNote.style.display = p ? '' : 'none';
       vertexRow.style.display = vertex ? '' : 'none';
@@ -517,6 +521,65 @@ function buildKeysCard(): HTMLElement {
     }).catch(() => { /* the static list above stays */ });
     const apiKey = el('input', { type: 'password', placeholder: existing?.apiKey?.set ? `설정됨 (${existing.apiKey.length}자) — 바꿀 때만 입력` : 'API 키' }) as HTMLInputElement;
     const keyLabel = el('span', { text: 'API 키' });
+    const keyRow = el('label', { class: 'field' }, [keyLabel, apiKey]);
+    // GitHub Copilot: no key to paste - GitHub's device login (an 8-letter
+    // code typed at github.com/login/device, from any device). The token
+    // stays on the backend; saving sends the login's state to claim it.
+    let copilot = false;
+    let ghClaim = '';
+    let stopGh: (() => void) | null = null;
+    const ghLine = el('div', { class: 'hint', text: existing?.provider === 'github-copilot' && existing.apiKey.set
+      ? `로그인됨${existing.note ? ' · ' + existing.note : ''} — 계정을 바꾸려면 다시 로그인` : 'GitHub 계정으로 로그인하면 키 대신 쓰입니다.' });
+    const ghOut = el('div');
+    const ghBtn = el('button', { class: 'primary tiny', text: 'GitHub 로그인 (기기 코드)' }) as HTMLButtonElement;
+    ghBtn.addEventListener('click', async () => {
+      ghBtn.disabled = true;
+      stopGh?.();
+      clear(ghOut);
+      ghClaim = '';
+      try {
+        const r = await state.copilotLoginStart();
+        const code = el('div', { class: 'mono', style: { fontSize: '1.6em', letterSpacing: '0.12em', fontWeight: '700', margin: '4px 0' }, text: r.userCode });
+        const copy = el('button', { class: 'ghost tiny', text: '코드 복사' });
+        copy.addEventListener('click', () => { copy.textContent = copyToClipboard(r.userCode) ? '복사됨' : '복사 실패'; });
+        const wait = el('div', { class: 'hint', text: 'GitHub 승인을 기다리는 중…' });
+        ghOut.appendChild(el('div', { class: 'notice' }, [
+          el('div', {}, [el('a', { href: r.verificationUri, target: '_blank', rel: 'noopener', text: r.verificationUri + ' 열기' })]),
+          el('div', { class: 'row' }, [code, copy]),
+          el('div', { class: 'hint', text: `위 주소(다른 기기여도 됨)에 코드를 입력하고 승인하세요. ${Math.round(r.expiresIn / 60)}분 안에 해야 합니다.` }),
+          wait,
+        ]));
+        try { window.open(r.verificationUri, '_blank', 'noopener'); } catch { /* the link is there */ }
+        let alive = true;
+        stopGh = () => { alive = false; };
+        const tick = async (): Promise<void> => {
+          if (!alive || !ghOut.isConnected) return;
+          try {
+            const st = await state.copilotLoginStatus(r.state);
+            if (st.done) {
+              ghClaim = r.state;
+              clear(ghOut);
+              ghOut.appendChild(el('div', { class: 'notice ok', text: `GitHub ${st.login || ''} 로그인 완료 — Copilot 사용 가능 확인. 저장을 누르세요.` }));
+              ghLine.textContent = '';
+              return;
+            }
+            if (st.error) { clear(ghOut); ghOut.appendChild(el('div', { class: 'notice err', text: st.error })); return; }
+          } catch { /* keep waiting */ }
+          setTimeout(() => void tick(), Math.max(3, r.interval) * 1000);
+        };
+        setTimeout(() => void tick(), Math.max(3, r.interval) * 1000);
+      } catch (e) {
+        ghOut.appendChild(el('div', { class: 'notice err', text: e instanceof Error ? e.message : String(e) }));
+      } finally {
+        ghBtn.disabled = false;
+      }
+    });
+    const ghBox = el('div', { style: { display: 'none', marginBottom: '10px' } }, [
+      el('div', { class: 'field' }, [el('span', { text: 'GitHub 계정' }), ghLine, el('div', { class: 'row' }, [ghBtn])]),
+      ghOut,
+      el('div', { class: 'notice warn', style: { marginTop: '6px' }, text:
+        'GitHub Copilot 을 GitHub 편집기 밖에서 쓰는 것은 GitHub 약관상 회색지대입니다. 자신의 책임 하에 사용해 주세요.' }),
+    ]);
     const note = el('input', { value: existing?.note ?? '', placeholder: '메모 (선택)' }) as HTMLInputElement;
     const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (프로바이더 이름으로 못 찾을 때만 · 예: https://generativelanguage.googleapis.com/v1beta/openai)' }) as HTMLInputElement;
     const urlRow = el('label', { class: 'field', style: { display: existing?.baseUrl ? '' : 'none' } }, [el('span', { text: 'Base URL 직접 지정' }), baseUrl]);
@@ -554,21 +617,25 @@ function buildKeysCard(): HTMLElement {
       el('label', { class: 'field' }, [el('span', { text: '프로바이더' }), provider, providerList]),
       el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '이름을 고르면 주소를 압니다. 주소가 따로 있으면 아래 직접 지정.' }),
       provNote,
-      el('label', { class: 'field' }, [keyLabel, apiKey]),
+      keyRow,
+      ghBox,
       vertexPicker, vertexFile, vertexRow,
       el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),
       urlRow,
       el('div', { class: 'row' }, [save, cancel, urlToggle]),
     ]);
-    cancel.addEventListener('click', () => { onClose(); });
+    cancel.addEventListener('click', () => { stopGh?.(); onClose(); });
     save.addEventListener('click', async () => {
       save.disabled = true;
       try {
         await state.saveApiKey({
           name: name.value, provider: provider.value, baseUrl: baseUrl.value, note: note.value,
           region: region.value || 'global',
-          apiKey: apiKey.value ? apiKey.value : (existing ? keepSentinel : ''),
+          apiKey: copilot
+            ? (ghClaim ? 'copilot-device:' + ghClaim : (existing ? keepSentinel : ''))
+            : apiKey.value ? apiKey.value : (existing ? keepSentinel : ''),
         }, existing?.id);
+        stopGh?.();
         say(existing ? '키를 저장했습니다. 이 키를 쓰는 프리셋에 바로 적용됩니다.' : '키를 추가했습니다. 에이전트 탭의 프리셋에서 고를 수 있습니다.', 'ok');
         onClose();
         await draw();

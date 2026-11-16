@@ -23,6 +23,7 @@ import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
 import { activeHalf } from './shell';
 import { installDrop } from './tree';
+import { collect, applyOne } from './leaveguard';
 
 type ScreenKind = 'chat' | 'bot' | 'persona' | 'module';
 
@@ -118,14 +119,22 @@ export class AgentPanel {
     el('span', { text: 'ChatGPT 요금제 사용 중' }),
     el('a', { href: 'https://chatgpt.com/settings/usage', target: '_blank', rel: 'noopener', text: '사용량 관리' }),
   ]);
+  /** GitHub Copilot quotas, in the same spot, while the preset runs on a Copilot key. */
+  private copilotLine = el('div', { class: 'chatgptplan copilotusage', style: { display: 'none' } });
+  private copilotAt = 0;
   private actionBox: HTMLElement;
   /** out/ paths already offered, so the card does not churn every refresh. */
   private planBox = el('div', { class: 'agentplan' });
   private modeButton = el('button', { class: 'ghost tiny', text: '실행 모드', title: '계획 모드에서는 조사와 계획 작성만 진행합니다' });
+  /** Manual 승인 <-> Auto 승인, per conversation (자동 승인 및 반영). */
+  private autoButton = el('button', { class: 'ghost tiny autotoggle', text: 'Manual 승인' }) as HTMLButtonElement;
   private planOpen = false;
   private folds: Record<string, boolean> = {};
   private outSeen = '';
   private outPrimed = false;
+  /** 자동 승인 및 반영 (this conversation): a pass is running / a 반영 waits for the turn to end. */
+  private autoRunning = false;
+  private applyAfterTurn = false;
 
   constructor(private hooks: AgentPanelHooks) {
     this.log = el('div', { class: 'agentlog' });
@@ -133,6 +142,7 @@ export class AgentPanel {
     this.actionBox = el('div', { class: 'stagedbox' });
     this.status = el('div', { class: 'hint grow' });
     this.modeButton.addEventListener('click', () => void this.switchMode());
+    this.autoButton.addEventListener('click', () => this.toggleAuto());
 
     const fresh = el('button', {
       class: 'ghost tiny', title: '지금 대화를 접고 새 대화를 시작합니다', text: '새 대화',
@@ -196,12 +206,13 @@ export class AgentPanel {
     // (Drops target the whole panel now - installDrop below the root.)
 
     this.root = el('div', { class: 'agentpanel' }, [
-      el('div', { class: 'agenthead' }, [this.status, this.modeButton, fresh, this.historyBtn]),
+      el('div', { class: 'agenthead' }, [this.status, this.modeButton, this.autoButton, fresh, this.historyBtn]),
       this.planBox,
       this.log,
       ...this.proposalTray(),
       this.attachBar,
       this.planLine,
+      this.copilotLine,
       // The two buttons stack beside the box, attach above send: the box is
       // two lines tall anyway, and a clip on the far left read as a third
       // control competing with the text rather than an option on sending.
@@ -476,6 +487,40 @@ export class AgentPanel {
     void state.workPlan().then((p) => this.setPlan(p)).catch(() => {});
   }
 
+  /**
+   * "Copilot (Free) · 채팅 198/200 · 프리미엄 0/0 · 12-01 초기화 · 사용량": the quotas
+   * GitHub's editors show, read after every turn (the backend caches a minute,
+   * `force` skips it after a turn). Hidden when the preset is not on Copilot.
+   */
+  private async refreshCopilot(force = false): Promise<void> {
+    if (!state.health?.copilot) { this.copilotLine.style.display = 'none'; return; }
+    if (!force && Date.now() - this.copilotAt < 30_000) return;
+    this.copilotAt = Date.now();
+    try {
+      const u = await state.copilotUsage(force);
+      if (this.destroyed) return;
+      const label: Record<string, string> = { chat: '채팅', premium_interactions: '프리미엄', completions: '완성' };
+      const bits = ['chat', 'premium_interactions'].filter((k) => u.quotas[k]).map((k) => {
+        const q = u.quotas[k];
+        return `${label[k]} ${q.unlimited ? '무제한' : `${q.remaining ?? '?'}/${q.entitlement ?? '?'}`}`;
+      });
+      const plan = /free/i.test(u.plan) ? 'Free' : /pro_?plus|pro\+/i.test(u.plan) ? 'Pro+' : /pro/i.test(u.plan) ? 'Pro'
+        : /business/i.test(u.plan) ? 'Business' : /enterprise/i.test(u.plan) ? 'Enterprise' : '';
+      clear(this.copilotLine);
+      // One line on a phone: short words, the reset date in the tooltip.
+      this.copilotLine.title = `GitHub Copilot ${u.plan}` + (u.resetDate ? ` · ${u.resetDate} 초기화` : '');
+      this.copilotLine.append(
+        el('span', { class: 'cpusage', text: `Copilot${plan ? ' ' + plan : ''} · ${bits.join(' · ')}` }),
+        el('a', { href: u.usageUrl, target: '_blank', rel: 'noopener', text: '관리' }),
+      );
+      this.copilotLine.style.display = '';
+    } catch (e) {
+      clear(this.copilotLine);
+      this.copilotLine.append(el('span', { text: 'GitHub Copilot 사용량을 읽지 못했습니다: ' + msg(e) }));
+      this.copilotLine.style.display = '';
+    }
+  }
+
   /** The input's prompt names the half that is open: 봇 on a bot tab, 챗 on
    * a chat tab (the user read "챗에서" while editing a card). Called on every
    * mount too - load() dedupes renders, and a tab switch changes the half. */
@@ -483,6 +528,7 @@ export class AgentPanel {
     const where = SCREEN_WORDS[screenKind()].where;
     this.input.placeholder = `${where}에서 수정이나 조정이 필요한 부분을 말씀하세요. 궁금한 점이 있다면 무엇이든 물어보세요.`;
     this.planLine.style.display = state.health?.chatgptPlan ? '' : 'none';
+    void this.refreshCopilot();
     // The welcome's examples follow the half as well.
     const w = this.log.querySelector('.welcome');
     if (w) w.replaceWith(this.welcome());
@@ -717,6 +763,158 @@ export class AgentPanel {
       unfold,
     ], items.map((a) => a.id).join(','));
     if (actCard) this.actionBox.appendChild(actCard);
+    if (this.autoOn()) void this.autoRun();
+  }
+
+  // --- 자동 승인 및 반영 (Auto 승인) -------------------------------------------------------
+  //
+  // The Manual/Auto toggle in the header, beside 실행 모드: per conversation,
+  // remembered in this browser by session id; a new conversation starts Manual. While
+  // on, the conversation's proposals are approved as they arrive (turn edits
+  // included) and, once the turn has ended, every unapplied scope without a
+  // conflict is written to RisuAI - what 상단 반영 → 모두 반영 does. Image
+  // generation (studio_batch) costs Anlas and stays a manual click.
+
+  private static readonly AUTO_KEY = 'hina.autoApproveSessions';
+
+  /**
+   * The Auto conversations, held in memory (module-wide, so a re-created
+   * panel keeps them) and mirrored to localStorage as a convenience. Reading
+   * the mode back from localStorage alone left the toggle stuck on Manual
+   * wherever that storage refuses writes (2026-11-16 report: the note
+   * appeared, the button never changed).
+   */
+  private static autoSet: Set<string> = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(AgentPanel.AUTO_KEY) || '[]');
+      return new Set(Array.isArray(v) ? v.map(String) : []);
+    } catch { return new Set<string>(); }
+  })();
+
+  /** Auto chosen before the conversation had a session id; stored once it has one. */
+  private static autoNext = false;
+
+  private autoOn(): boolean {
+    const sid = state.sessionId;
+    return sid ? (AgentPanel.autoNext || AgentPanel.autoSet.has(sid)) : AgentPanel.autoNext;
+  }
+
+  private setAuto(on: boolean): void {
+    const sid = state.sessionId;
+    AgentPanel.autoNext = on && !sid;
+    if (!sid) return;
+    if (on) AgentPanel.autoSet.add(sid);
+    else AgentPanel.autoSet.delete(sid);
+    try {
+      localStorage.setItem(AgentPanel.AUTO_KEY, JSON.stringify([...AgentPanel.autoSet].slice(-50)));
+    } catch { /* memory still holds it for this page */ }
+  }
+
+  /** The header toggle's face follows the conversation on screen. */
+  private syncAuto(): void {
+    if (AgentPanel.autoNext && state.sessionId) this.setAuto(true);
+    const on = this.autoOn();
+    this.autoButton.textContent = on ? 'Auto 모드 On' : 'Manual 승인';
+    this.autoButton.classList.toggle('on', on);
+    this.autoButton.setAttribute('aria-pressed', on ? 'true' : 'false');
+    this.autoButton.title = on
+      ? '이 대화의 AI 제안을 자동으로 승인하고, 턴이 끝나면 RisuAI 에 반영합니다 — 눌러서 Manual 로'
+      : 'AI 제안을 하나씩 직접 승인합니다 — 눌러서 Auto 로';
+  }
+
+  private toggleAuto(): void {
+    const on = !this.autoOn();
+    this.setAuto(on);
+    this.syncAuto();
+    if (on) {
+      this.note('⚡ Auto 모드 On (이 대화만): 앞으로 AI 제안(턴 수정 포함)을 바로 승인·실행하고, 턴이 끝나면 '
+        + '반영할 변경을 RisuAI 에 자동으로 반영합니다. 단, 이미지 생성(Anlas 소모)과 RisuAI 쪽과 충돌이 있는 반영은 '
+        + '직접 처리해야 합니다. 직접 고쳐 두고 아직 반영하지 않은 변경도 함께 반영되니, 중요한 봇은 먼저 스냅샷을 '
+        + '남겨 두세요. 새 대화는 다시 Manual 로 시작합니다.', 'ok');
+      void this.autoRun();
+    } else {
+      this.note('Manual 승인 모드: 이후 AI 제안은 승인 카드나 상단 승인 버튼에서 직접 승인하고, 반영도 직접 합니다.');
+    }
+  }
+
+  /** Approve what waits (except image generation), then 반영 if the turn is over. */
+  private async autoRun(): Promise<void> {
+    if (this.autoRunning || this.destroyed || !this.autoOn()) return;
+    this.autoRunning = true;
+    let approved = 0;
+    try {
+      const [acts, staged] = await Promise.all([
+        state.actions().catch(() => [] as PendingAction[]),
+        state.stagedEdits().catch(() => [] as StagedEdit[]),
+      ]);
+      for (const a of acts) {
+        if (a.kind === 'studio_batch') continue;
+        try {
+          const said = await state.decideAction(a.id, true);
+          approved += 1;
+          this.note('⚡ 자동 승인·실행: ' + a.summary + (said ? ' — ' + said : ''), 'ok');
+        } catch (e) {
+          // Stop here: what follows may depend on this one.
+          this.note('✖ 자동 승인 실패: ' + a.summary + ' — ' + msg(e), 'err');
+          break;
+        }
+      }
+      if (staged.length) {
+        try {
+          const r = await state.approveStaged(true);
+          approved += r.decided;
+          this.note(`⚡ 턴 수정 제안 ${r.decided}건을 자동 승인해 ${r.applied}건을 적용했습니다.`, 'ok');
+        } catch (e) {
+          this.note('✖ 턴 수정 자동 승인 실패: ' + msg(e), 'err');
+        }
+      }
+      if (approved) {
+        this.applyAfterTurn = true;
+        await this.hooks.onApplied();
+      }
+    } finally {
+      this.autoRunning = false;
+    }
+    // Re-reading redraws the cards; with nothing approvable left that pass
+    // approves nothing and stops, so this cannot loop.
+    if (approved) await this.refreshStaged();
+    if (this.applyAfterTurn && !this.busy) await this.autoApply();
+  }
+
+  /** 반영 of every scope with unapplied work and no conflict - after the turn. */
+  private async autoApply(): Promise<void> {
+    if (this.autoRunning || this.destroyed || !this.autoOn()) return;
+    this.applyAfterTurn = false;
+    this.autoRunning = true;
+    const back = state.activeChatKey;
+    try {
+      const summary = await state.dirtySummary();
+      if (!summary) return;
+      const done: string[] = [];
+      for (const d of collect(summary)) {
+        if (d.conflicts) {
+          this.note(`⚠ ${d.label}: RisuAI 쪽과 충돌 ${d.conflicts}건이 있어 자동 반영하지 않았습니다. 상단 반영에서 해결해 주세요.`, 'err');
+          continue;
+        }
+        try {
+          await applyOne(d);
+          done.push(d.label);
+        } catch (e) {
+          this.note(`✖ ${d.label} 자동 반영 실패: ${msg(e)}`, 'err');
+          break;
+        }
+      }
+      if (done.length) this.note(`⚡ ${done.join(', ')} 을(를) RisuAI 에 자동 반영하고 저장을 확인했습니다.`, 'ok');
+    } catch (e) {
+      this.note('✖ 자동 반영 실패: ' + msg(e), 'err');
+    } finally {
+      this.autoRunning = false;
+      // A chat's 반영 opens that chat; come back to the one the user was on.
+      if (back && back !== state.activeChatKey && state.workspace?.chats.some((c) => c.chatKey === back)) {
+        try { await state.loadTurns(back); } catch { /* stay where the write left us */ }
+      }
+      state.bump();
+    }
   }
 
   private async newConversation(): Promise<void> {
@@ -1292,6 +1490,8 @@ export class AgentPanel {
       if (this.timer !== null) finish('종료');
       this.busy = false;
       this.modeButton.disabled = false;
+      if (this.applyAfterTurn && this.autoOn()) void this.autoApply();
+      void this.refreshCopilot(true);
       if (!this.destroyed && state.sessionId) void state.workPlan().then((p) => this.setPlan(p)).catch(() => {});
       this.send.disabled = false;
       this.scroll();
@@ -1415,6 +1615,7 @@ export class AgentPanel {
       el('div', { class: 'row', style: { marginTop: '8px' } }, [approve, reject]),
     ], items.map((i) => i.id).join(','));
     if (stagedCard) this.stagedBox.appendChild(stagedCard);
+    if (this.autoOn()) void this.autoRun();
   }
 
   /**
@@ -1512,6 +1713,7 @@ export class AgentPanel {
 
   private setPlan(plan: WorkPlan): void {
     if (this.destroyed) return;
+    this.syncAuto();
     this.modeButton.textContent = plan.mode === 'plan' ? '계획 모드' : '실행 모드';
     clear(this.planBox);
     if (!plan.document && !plan.tasks.length && plan.mode !== 'plan') return;

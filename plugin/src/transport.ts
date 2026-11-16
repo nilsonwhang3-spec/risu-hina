@@ -47,6 +47,8 @@ export interface HealthInfo {
   codexEnabled?: boolean;
   /** The agent's preset runs on the user's ChatGPT plan. */
   chatgptPlan?: boolean;
+  /** The agent's preset runs on a GitHub Copilot key (quotas shown by the composer). */
+  copilot?: boolean;
   workspaces?: number;
   /** The global file space's root path. */
   space?: string;

@@ -522,6 +522,7 @@ def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
     import openai
     c = openai.AsyncOpenAI(base_url=base, api_key=key, timeout=timeout)
     _vertex = is_vertex(base)
+    _copilot = "githubcopilot.com" in base.lower()
     for res in (c.chat.completions, c.responses):
         orig = res.create
         chat = res is c.chat.completions
@@ -530,6 +531,9 @@ def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
             # Provider-required headers (OpenCode's per-conversation session
             # id), read before `drop` may pop the prompt_cache_key they reuse.
             auto = providers.auto_headers(base, str(kw.get("prompt_cache_key") or ""))
+            if _copilot:
+                from . import copilotauth
+                auto["X-Initiator"] = copilotauth.initiator(kw.get("messages") or kw.get("input"))
             if auto:
                 kw["extra_headers"] = providers.merge_headers(kw.get("extra_headers"), auto)
             for k in drop:

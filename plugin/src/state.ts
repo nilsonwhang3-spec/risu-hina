@@ -471,6 +471,10 @@ export interface CodexStatus {
   base: string; usageUrl: string; redirectUri: string;
 }
 
+/** GitHub Copilot quotas (GET /copilot/usage). */
+export interface CopilotQuota { remaining: number | null; entitlement: number | null; unlimited: boolean; percentRemaining: number | null; overage: number }
+export interface CopilotUsage { plan: string; resetDate: string; quotas: Record<string, CopilotQuota>; usageUrl: string }
+
 export interface CatalogResult {
   providers: CatalogProvider[]; models: CatalogModel[]; truncated: boolean;
   totalProviders: number; cachedAt: number; stale: boolean; source: string;
@@ -2890,6 +2894,19 @@ class AppState {
 
   async apiKeys(): Promise<{ keys: ApiKeyEntry[]; keepSentinel: string }> {
     return await transport.get('/keys');
+  }
+
+  /** GitHub Copilot key: start GitHub's device login (8-letter code). */
+  async copilotLoginStart(): Promise<{ state: string; userCode: string; verificationUri: string; expiresIn: number; interval: number }> {
+    return await transport.post('/copilot/login/start', {});
+  }
+
+  async copilotLoginStatus(state: string): Promise<{ known: boolean; done: boolean; error: string; login?: string; api?: string }> {
+    return await transport.get('/copilot/login/status', { state });
+  }
+
+  async copilotUsage(force = false): Promise<CopilotUsage> {
+    return await transport.get('/copilot/usage', force ? { force: '1' } : {});
   }
 
   async saveApiKey(values: Record<string, unknown>, id?: string): Promise<ApiKeyEntry> {

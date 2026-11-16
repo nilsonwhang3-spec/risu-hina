@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.59
+//@display-name Risu Hina v0.15.60
 //@api 3.0
-//@version 0.15.59
+//@version 0.15.60
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -284,7 +284,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.59", String(body.version || ""));
+          this.gate = versionGate("0.15.60", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -5548,6 +5548,16 @@ name: ${nm}
         async apiKeys() {
           return await transport.get("/keys");
         }
+        /** GitHub Copilot key: start GitHub's device login (8-letter code). */
+        async copilotLoginStart() {
+          return await transport.post("/copilot/login/start", {});
+        }
+        async copilotLoginStatus(state2) {
+          return await transport.get("/copilot/login/status", { state: state2 });
+        }
+        async copilotUsage(force = false) {
+          return await transport.get("/copilot/usage", force ? { force: "1" } : {});
+        }
         async saveApiKey(values, id) {
           const r = await transport.post("/keys/save", { values, id });
           return r.key;
@@ -8981,6 +8991,7 @@ label.checkrow input { width: auto; }
 }
 .right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
 .agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.agenthead .autotoggle.on { color: var(--ok, #34d399); border-color: var(--ok, #34d399); font-weight: 700; }
 .agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
 /* The log is the one thing that must never be squeezed out: the plan and the
    proposal tray above and below it shrink and scroll first. */
@@ -9179,6 +9190,9 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 
 .attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
 .chatgptplan { display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 11px; opacity: .8; }
+.copilotusage { flex-wrap: nowrap; min-width: 0; white-space: nowrap; }
+.copilotusage .cpusage { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.copilotusage a { flex-shrink: 0; }
 .attachchip {
   display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
   padding: 2px 4px 2px 8px; border-radius: 5px; font-size: 11.5px;
@@ -10397,6 +10411,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       this.actionBox = el("div", { class: "stagedbox" });
       this.status = el("div", { class: "hint grow" });
       this.modeButton.addEventListener("click", () => void this.switchMode());
+      this.autoButton.addEventListener("click", () => this.toggleAuto());
       const fresh = el("button", {
         class: "ghost tiny",
         title: "\uC9C0\uAE08 \uB300\uD654\uB97C \uC811\uACE0 \uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD569\uB2C8\uB2E4",
@@ -10443,12 +10458,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         void this.attachAll(files);
       });
       this.root = el("div", { class: "agentpanel" }, [
-        el("div", { class: "agenthead" }, [this.status, this.modeButton, fresh, this.historyBtn]),
+        el("div", { class: "agenthead" }, [this.status, this.modeButton, this.autoButton, fresh, this.historyBtn]),
         this.planBox,
         this.log,
         ...this.proposalTray(),
         this.attachBar,
         this.planLine,
+        this.copilotLine,
         // The two buttons stack beside the box, attach above send: the box is
         // two lines tall anyway, and a clip on the far left read as a third
         // control competing with the text rather than an option on sending.
@@ -10481,14 +10497,22 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("span", { text: "ChatGPT \uC694\uAE08\uC81C \uC0AC\uC6A9 \uC911" }),
       el("a", { href: "https://chatgpt.com/settings/usage", target: "_blank", rel: "noopener", text: "\uC0AC\uC6A9\uB7C9 \uAD00\uB9AC" })
     ]);
+    /** GitHub Copilot quotas, in the same spot, while the preset runs on a Copilot key. */
+    copilotLine = el("div", { class: "chatgptplan copilotusage", style: { display: "none" } });
+    copilotAt = 0;
     actionBox;
     /** out/ paths already offered, so the card does not churn every refresh. */
     planBox = el("div", { class: "agentplan" });
     modeButton = el("button", { class: "ghost tiny", text: "\uC2E4\uD589 \uBAA8\uB4DC", title: "\uACC4\uD68D \uBAA8\uB4DC\uC5D0\uC11C\uB294 \uC870\uC0AC\uC640 \uACC4\uD68D \uC791\uC131\uB9CC \uC9C4\uD589\uD569\uB2C8\uB2E4" });
+    /** Manual 승인 <-> Auto 승인, per conversation (자동 승인 및 반영). */
+    autoButton = el("button", { class: "ghost tiny autotoggle", text: "Manual \uC2B9\uC778" });
     planOpen = false;
     folds = {};
     outSeen = "";
     outPrimed = false;
+    /** 자동 승인 및 반영 (this conversation): a pass is running / a 반영 waits for the turn to end. */
+    autoRunning = false;
+    applyAfterTurn = false;
     /**
      * Upload files and remember them until the next message goes out.
      *
@@ -10730,6 +10754,40 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       void state.workPlan().then((p) => this.setPlan(p)).catch(() => {
       });
     }
+    /**
+     * "Copilot (Free) · 채팅 198/200 · 프리미엄 0/0 · 12-01 초기화 · 사용량": the quotas
+     * GitHub's editors show, read after every turn (the backend caches a minute,
+     * `force` skips it after a turn). Hidden when the preset is not on Copilot.
+     */
+    async refreshCopilot(force = false) {
+      if (!state.health?.copilot) {
+        this.copilotLine.style.display = "none";
+        return;
+      }
+      if (!force && Date.now() - this.copilotAt < 3e4) return;
+      this.copilotAt = Date.now();
+      try {
+        const u = await state.copilotUsage(force);
+        if (this.destroyed) return;
+        const label2 = { chat: "\uCC44\uD305", premium_interactions: "\uD504\uB9AC\uBBF8\uC5C4", completions: "\uC644\uC131" };
+        const bits = ["chat", "premium_interactions"].filter((k) => u.quotas[k]).map((k) => {
+          const q = u.quotas[k];
+          return `${label2[k]} ${q.unlimited ? "\uBB34\uC81C\uD55C" : `${q.remaining ?? "?"}/${q.entitlement ?? "?"}`}`;
+        });
+        const plan = /free/i.test(u.plan) ? "Free" : /pro_?plus|pro\+/i.test(u.plan) ? "Pro+" : /pro/i.test(u.plan) ? "Pro" : /business/i.test(u.plan) ? "Business" : /enterprise/i.test(u.plan) ? "Enterprise" : "";
+        clear(this.copilotLine);
+        this.copilotLine.title = `GitHub Copilot ${u.plan}` + (u.resetDate ? ` \xB7 ${u.resetDate} \uCD08\uAE30\uD654` : "");
+        this.copilotLine.append(
+          el("span", { class: "cpusage", text: `Copilot${plan ? " " + plan : ""} \xB7 ${bits.join(" \xB7 ")}` }),
+          el("a", { href: u.usageUrl, target: "_blank", rel: "noopener", text: "\uAD00\uB9AC" })
+        );
+        this.copilotLine.style.display = "";
+      } catch (e) {
+        clear(this.copilotLine);
+        this.copilotLine.append(el("span", { text: "GitHub Copilot \uC0AC\uC6A9\uB7C9\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e) }));
+        this.copilotLine.style.display = "";
+      }
+    }
     /** The input's prompt names the half that is open: 봇 on a bot tab, 챗 on
      * a chat tab (the user read "챗에서" while editing a card). Called on every
      * mount too - load() dedupes renders, and a tab switch changes the half. */
@@ -10737,6 +10795,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const where = SCREEN_WORDS[screenKind()].where;
       this.input.placeholder = `${where}\uC5D0\uC11C \uC218\uC815\uC774\uB098 \uC870\uC815\uC774 \uD544\uC694\uD55C \uBD80\uBD84\uC744 \uB9D0\uC500\uD558\uC138\uC694. \uAD81\uAE08\uD55C \uC810\uC774 \uC788\uB2E4\uBA74 \uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694.`;
       this.planLine.style.display = state.health?.chatgptPlan ? "" : "none";
+      void this.refreshCopilot();
       const w = this.log.querySelector(".welcome");
       if (w) w.replaceWith(this.welcome());
     }
@@ -10935,6 +10994,145 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         unfold
       ], items5.map((a) => a.id).join(","));
       if (actCard) this.actionBox.appendChild(actCard);
+      if (this.autoOn()) void this.autoRun();
+    }
+    // --- 자동 승인 및 반영 (Auto 승인) -------------------------------------------------------
+    //
+    // The Manual/Auto toggle in the header, beside 실행 모드: per conversation,
+    // remembered in this browser by session id; a new conversation starts Manual. While
+    // on, the conversation's proposals are approved as they arrive (turn edits
+    // included) and, once the turn has ended, every unapplied scope without a
+    // conflict is written to RisuAI - what 상단 반영 → 모두 반영 does. Image
+    // generation (studio_batch) costs Anlas and stays a manual click.
+    static AUTO_KEY = "hina.autoApproveSessions";
+    /**
+     * The Auto conversations, held in memory (module-wide, so a re-created
+     * panel keeps them) and mirrored to localStorage as a convenience. Reading
+     * the mode back from localStorage alone left the toggle stuck on Manual
+     * wherever that storage refuses writes (2026-11-16 report: the note
+     * appeared, the button never changed).
+     */
+    static autoSet = (() => {
+      try {
+        const v = JSON.parse(localStorage.getItem(_AgentPanel.AUTO_KEY) || "[]");
+        return new Set(Array.isArray(v) ? v.map(String) : []);
+      } catch {
+        return /* @__PURE__ */ new Set();
+      }
+    })();
+    /** Auto chosen before the conversation had a session id; stored once it has one. */
+    static autoNext = false;
+    autoOn() {
+      const sid = state.sessionId;
+      return sid ? _AgentPanel.autoNext || _AgentPanel.autoSet.has(sid) : _AgentPanel.autoNext;
+    }
+    setAuto(on) {
+      const sid = state.sessionId;
+      _AgentPanel.autoNext = on && !sid;
+      if (!sid) return;
+      if (on) _AgentPanel.autoSet.add(sid);
+      else _AgentPanel.autoSet.delete(sid);
+      try {
+        localStorage.setItem(_AgentPanel.AUTO_KEY, JSON.stringify([..._AgentPanel.autoSet].slice(-50)));
+      } catch {
+      }
+    }
+    /** The header toggle's face follows the conversation on screen. */
+    syncAuto() {
+      if (_AgentPanel.autoNext && state.sessionId) this.setAuto(true);
+      const on = this.autoOn();
+      this.autoButton.textContent = on ? "Auto \uBAA8\uB4DC On" : "Manual \uC2B9\uC778";
+      this.autoButton.classList.toggle("on", on);
+      this.autoButton.setAttribute("aria-pressed", on ? "true" : "false");
+      this.autoButton.title = on ? "\uC774 \uB300\uD654\uC758 AI \uC81C\uC548\uC744 \uC790\uB3D9\uC73C\uB85C \uC2B9\uC778\uD558\uACE0, \uD134\uC774 \uB05D\uB098\uBA74 RisuAI \uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4 \u2014 \uB20C\uB7EC\uC11C Manual \uB85C" : "AI \uC81C\uC548\uC744 \uD558\uB098\uC529 \uC9C1\uC811 \uC2B9\uC778\uD569\uB2C8\uB2E4 \u2014 \uB20C\uB7EC\uC11C Auto \uB85C";
+    }
+    toggleAuto() {
+      const on = !this.autoOn();
+      this.setAuto(on);
+      this.syncAuto();
+      if (on) {
+        this.note("\u26A1 Auto \uBAA8\uB4DC On (\uC774 \uB300\uD654\uB9CC): \uC55E\uC73C\uB85C AI \uC81C\uC548(\uD134 \uC218\uC815 \uD3EC\uD568)\uC744 \uBC14\uB85C \uC2B9\uC778\xB7\uC2E4\uD589\uD558\uACE0, \uD134\uC774 \uB05D\uB098\uBA74 \uBC18\uC601\uD560 \uBCC0\uACBD\uC744 RisuAI \uC5D0 \uC790\uB3D9\uC73C\uB85C \uBC18\uC601\uD569\uB2C8\uB2E4. \uB2E8, \uC774\uBBF8\uC9C0 \uC0DD\uC131(Anlas \uC18C\uBAA8)\uACFC RisuAI \uCABD\uACFC \uCDA9\uB3CC\uC774 \uC788\uB294 \uBC18\uC601\uC740 \uC9C1\uC811 \uCC98\uB9AC\uD574\uC57C \uD569\uB2C8\uB2E4. \uC9C1\uC811 \uACE0\uCCD0 \uB450\uACE0 \uC544\uC9C1 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD\uB3C4 \uD568\uAED8 \uBC18\uC601\uB418\uB2C8, \uC911\uC694\uD55C \uBD07\uC740 \uBA3C\uC800 \uC2A4\uB0C5\uC0F7\uC744 \uB0A8\uACA8 \uB450\uC138\uC694. \uC0C8 \uB300\uD654\uB294 \uB2E4\uC2DC Manual \uB85C \uC2DC\uC791\uD569\uB2C8\uB2E4.", "ok");
+        void this.autoRun();
+      } else {
+        this.note("Manual \uC2B9\uC778 \uBAA8\uB4DC: \uC774\uD6C4 AI \uC81C\uC548\uC740 \uC2B9\uC778 \uCE74\uB4DC\uB098 \uC0C1\uB2E8 \uC2B9\uC778 \uBC84\uD2BC\uC5D0\uC11C \uC9C1\uC811 \uC2B9\uC778\uD558\uACE0, \uBC18\uC601\uB3C4 \uC9C1\uC811 \uD569\uB2C8\uB2E4.");
+      }
+    }
+    /** Approve what waits (except image generation), then 반영 if the turn is over. */
+    async autoRun() {
+      if (this.autoRunning || this.destroyed || !this.autoOn()) return;
+      this.autoRunning = true;
+      let approved = 0;
+      try {
+        const [acts, staged] = await Promise.all([
+          state.actions().catch(() => []),
+          state.stagedEdits().catch(() => [])
+        ]);
+        for (const a of acts) {
+          if (a.kind === "studio_batch") continue;
+          try {
+            const said = await state.decideAction(a.id, true);
+            approved += 1;
+            this.note("\u26A1 \uC790\uB3D9 \uC2B9\uC778\xB7\uC2E4\uD589: " + a.summary + (said ? " \u2014 " + said : ""), "ok");
+          } catch (e) {
+            this.note("\u2716 \uC790\uB3D9 \uC2B9\uC778 \uC2E4\uD328: " + a.summary + " \u2014 " + msg7(e), "err");
+            break;
+          }
+        }
+        if (staged.length) {
+          try {
+            const r = await state.approveStaged(true);
+            approved += r.decided;
+            this.note(`\u26A1 \uD134 \uC218\uC815 \uC81C\uC548 ${r.decided}\uAC74\uC744 \uC790\uB3D9 \uC2B9\uC778\uD574 ${r.applied}\uAC74\uC744 \uC801\uC6A9\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
+          } catch (e) {
+            this.note("\u2716 \uD134 \uC218\uC815 \uC790\uB3D9 \uC2B9\uC778 \uC2E4\uD328: " + msg7(e), "err");
+          }
+        }
+        if (approved) {
+          this.applyAfterTurn = true;
+          await this.hooks.onApplied();
+        }
+      } finally {
+        this.autoRunning = false;
+      }
+      if (approved) await this.refreshStaged();
+      if (this.applyAfterTurn && !this.busy) await this.autoApply();
+    }
+    /** 반영 of every scope with unapplied work and no conflict - after the turn. */
+    async autoApply() {
+      if (this.autoRunning || this.destroyed || !this.autoOn()) return;
+      this.applyAfterTurn = false;
+      this.autoRunning = true;
+      const back = state.activeChatKey;
+      try {
+        const summary = await state.dirtySummary();
+        if (!summary) return;
+        const done = [];
+        for (const d of collect(summary)) {
+          if (d.conflicts) {
+            this.note(`\u26A0 ${d.label}: RisuAI \uCABD\uACFC \uCDA9\uB3CC ${d.conflicts}\uAC74\uC774 \uC788\uC5B4 \uC790\uB3D9 \uBC18\uC601\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC0C1\uB2E8 \uBC18\uC601\uC5D0\uC11C \uD574\uACB0\uD574 \uC8FC\uC138\uC694.`, "err");
+            continue;
+          }
+          try {
+            await applyOne(d);
+            done.push(d.label);
+          } catch (e) {
+            this.note(`\u2716 ${d.label} \uC790\uB3D9 \uBC18\uC601 \uC2E4\uD328: ${msg7(e)}`, "err");
+            break;
+          }
+        }
+        if (done.length) this.note(`\u26A1 ${done.join(", ")} \uC744(\uB97C) RisuAI \uC5D0 \uC790\uB3D9 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
+      } catch (e) {
+        this.note("\u2716 \uC790\uB3D9 \uBC18\uC601 \uC2E4\uD328: " + msg7(e), "err");
+      } finally {
+        this.autoRunning = false;
+        if (back && back !== state.activeChatKey && state.workspace?.chats.some((c) => c.chatKey === back)) {
+          try {
+            await state.loadTurns(back);
+          } catch {
+          }
+        }
+        state.bump();
+      }
     }
     async newConversation() {
       if (this.busy) return;
@@ -11426,6 +11624,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (this.timer !== null) finish("\uC885\uB8CC");
         this.busy = false;
         this.modeButton.disabled = false;
+        if (this.applyAfterTurn && this.autoOn()) void this.autoApply();
+        void this.refreshCopilot(true);
         if (!this.destroyed && state.sessionId) void state.workPlan().then((p) => this.setPlan(p)).catch(() => {
         });
         this.send.disabled = false;
@@ -11542,6 +11742,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { class: "row", style: { marginTop: "8px" } }, [approve, reject])
       ], items5.map((i) => i.id).join(","));
       if (stagedCard) this.stagedBox.appendChild(stagedCard);
+      if (this.autoOn()) void this.autoRun();
     }
     /**
      * The two proposal cards share one tray between the log and the input, and
@@ -11646,6 +11847,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     dismissed = {};
     setPlan(plan) {
       if (this.destroyed) return;
+      this.syncAuto();
       this.modeButton.textContent = plan.mode === "plan" ? "\uACC4\uD68D \uBAA8\uB4DC" : "\uC2E4\uD589 \uBAA8\uB4DC";
       clear(this.planBox);
       if (!plan.document && !plan.tasks.length && plan.mode !== "plan") return;
@@ -18586,7 +18788,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       diag = null;
     }
     const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
-    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.59"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.60"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
     const health = state.health ?? {};
     lines.push("\uD658\uACBD: " + [
       `RisuAI ${transport.hostPlatform || "?"}`,
@@ -18710,10 +18912,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.59";
+          const mismatch = r.current !== "0.15.60";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.59"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.60"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18806,7 +19008,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.59",
+            version: "0.15.60",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -20005,13 +20207,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const form = (existing, onClose) => {
       const name = el("input", { value: existing?.name ?? "", placeholder: "\uC774\uB984 (\uD655\uC778\uC6A9, \uC608: \uB0B4 Gemini \uD0A4)" });
       const provider = el("input", { value: existing?.provider ?? "", placeholder: "\uD504\uB85C\uBC14\uC774\uB354 (\uC608: google, openai, openrouter, vercel)", list: "hina-providers" });
-      const providerList = el("datalist", { id: "hina-providers" }, ["google", "openai", "anthropic", "openrouter", "vercel", "groq", "deepseek", "xai", "mistral", "ollama"].map((p) => el("option", { value: p })));
+      const providerList = el("datalist", { id: "hina-providers" }, ["google", "openai", "anthropic", "openrouter", "vercel", "github-copilot", "groq", "deepseek", "xai", "mistral", "ollama"].map((p) => el("option", { value: p })));
       const provNote = el("div", { class: "notice", style: { marginTop: "-4px", marginBottom: "10px", display: "none" } });
       let profiles = [];
       const syncProv = () => {
         const want = provider.value.trim().toLowerCase();
         const p = want ? profiles.find((x) => x.id === want || x.name.toLowerCase() === want || x.hosts.some((h) => want.includes(h))) : null;
         const vertex = p?.id === "vertex" || ["vertex", "vertex ai", "vertexai"].includes(want);
+        copilot = p?.id === "github-copilot" || ["copilot", "github copilot", "github-copilot"].includes(want);
+        keyRow.style.display = copilot ? "none" : "";
+        ghBox.style.display = copilot ? "" : "none";
+        if (copilot && !name.value.trim()) name.value = "GitHub Copilot";
         clear(provNote);
         provNote.style.display = p ? "" : "none";
         vertexRow.style.display = vertex ? "" : "none";
@@ -20038,6 +20244,72 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       });
       const apiKey = el("input", { type: "password", placeholder: existing?.apiKey?.set ? `\uC124\uC815\uB428 (${existing.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : "API \uD0A4" });
       const keyLabel = el("span", { text: "API \uD0A4" });
+      const keyRow = el("label", { class: "field" }, [keyLabel, apiKey]);
+      let copilot = false;
+      let ghClaim = "";
+      let stopGh = null;
+      const ghLine = el("div", { class: "hint", text: existing?.provider === "github-copilot" && existing.apiKey.set ? `\uB85C\uADF8\uC778\uB428${existing.note ? " \xB7 " + existing.note : ""} \u2014 \uACC4\uC815\uC744 \uBC14\uAFB8\uB824\uBA74 \uB2E4\uC2DC \uB85C\uADF8\uC778` : "GitHub \uACC4\uC815\uC73C\uB85C \uB85C\uADF8\uC778\uD558\uBA74 \uD0A4 \uB300\uC2E0 \uC4F0\uC785\uB2C8\uB2E4." });
+      const ghOut = el("div");
+      const ghBtn = el("button", { class: "primary tiny", text: "GitHub \uB85C\uADF8\uC778 (\uAE30\uAE30 \uCF54\uB4DC)" });
+      ghBtn.addEventListener("click", async () => {
+        ghBtn.disabled = true;
+        stopGh?.();
+        clear(ghOut);
+        ghClaim = "";
+        try {
+          const r = await state.copilotLoginStart();
+          const code = el("div", { class: "mono", style: { fontSize: "1.6em", letterSpacing: "0.12em", fontWeight: "700", margin: "4px 0" }, text: r.userCode });
+          const copy = el("button", { class: "ghost tiny", text: "\uCF54\uB4DC \uBCF5\uC0AC" });
+          copy.addEventListener("click", () => {
+            copy.textContent = copyToClipboard(r.userCode) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+          });
+          const wait = el("div", { class: "hint", text: "GitHub \uC2B9\uC778\uC744 \uAE30\uB2E4\uB9AC\uB294 \uC911\u2026" });
+          ghOut.appendChild(el("div", { class: "notice" }, [
+            el("div", {}, [el("a", { href: r.verificationUri, target: "_blank", rel: "noopener", text: r.verificationUri + " \uC5F4\uAE30" })]),
+            el("div", { class: "row" }, [code, copy]),
+            el("div", { class: "hint", text: `\uC704 \uC8FC\uC18C(\uB2E4\uB978 \uAE30\uAE30\uC5EC\uB3C4 \uB428)\uC5D0 \uCF54\uB4DC\uB97C \uC785\uB825\uD558\uACE0 \uC2B9\uC778\uD558\uC138\uC694. ${Math.round(r.expiresIn / 60)}\uBD84 \uC548\uC5D0 \uD574\uC57C \uD569\uB2C8\uB2E4.` }),
+            wait
+          ]));
+          try {
+            window.open(r.verificationUri, "_blank", "noopener");
+          } catch {
+          }
+          let alive = true;
+          stopGh = () => {
+            alive = false;
+          };
+          const tick2 = async () => {
+            if (!alive || !ghOut.isConnected) return;
+            try {
+              const st = await state.copilotLoginStatus(r.state);
+              if (st.done) {
+                ghClaim = r.state;
+                clear(ghOut);
+                ghOut.appendChild(el("div", { class: "notice ok", text: `GitHub ${st.login || ""} \uB85C\uADF8\uC778 \uC644\uB8CC \u2014 Copilot \uC0AC\uC6A9 \uAC00\uB2A5 \uD655\uC778. \uC800\uC7A5\uC744 \uB204\uB974\uC138\uC694.` }));
+                ghLine.textContent = "";
+                return;
+              }
+              if (st.error) {
+                clear(ghOut);
+                ghOut.appendChild(el("div", { class: "notice err", text: st.error }));
+                return;
+              }
+            } catch {
+            }
+            setTimeout(() => void tick2(), Math.max(3, r.interval) * 1e3);
+          };
+          setTimeout(() => void tick2(), Math.max(3, r.interval) * 1e3);
+        } catch (e) {
+          ghOut.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+        } finally {
+          ghBtn.disabled = false;
+        }
+      });
+      const ghBox = el("div", { style: { display: "none", marginBottom: "10px" } }, [
+        el("div", { class: "field" }, [el("span", { text: "GitHub \uACC4\uC815" }), ghLine, el("div", { class: "row" }, [ghBtn])]),
+        ghOut,
+        el("div", { class: "notice warn", style: { marginTop: "6px" }, text: "GitHub Copilot \uC744 GitHub \uD3B8\uC9D1\uAE30 \uBC16\uC5D0\uC11C \uC4F0\uB294 \uAC83\uC740 GitHub \uC57D\uAD00\uC0C1 \uD68C\uC0C9\uC9C0\uB300\uC785\uB2C8\uB2E4. \uC790\uC2E0\uC758 \uCC45\uC784 \uD558\uC5D0 \uC0AC\uC6A9\uD574 \uC8FC\uC138\uC694." })
+      ]);
       const note = el("input", { value: existing?.note ?? "", placeholder: "\uBA54\uBAA8 (\uC120\uD0DD)" });
       const baseUrl = el("input", { value: existing?.baseUrl ?? "", placeholder: "Base URL (\uD504\uB85C\uBC14\uC774\uB354 \uC774\uB984\uC73C\uB85C \uBABB \uCC3E\uC744 \uB54C\uB9CC \xB7 \uC608: https://generativelanguage.googleapis.com/v1beta/openai)" });
       const urlRow = el("label", { class: "field", style: { display: existing?.baseUrl ? "" : "none" } }, [el("span", { text: "Base URL \uC9C1\uC811 \uC9C0\uC815" }), baseUrl]);
@@ -20078,7 +20350,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("label", { class: "field" }, [el("span", { text: "\uD504\uB85C\uBC14\uC774\uB354" }), provider, providerList]),
         el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" }, text: "\uC774\uB984\uC744 \uACE0\uB974\uBA74 \uC8FC\uC18C\uB97C \uC555\uB2C8\uB2E4. \uC8FC\uC18C\uAC00 \uB530\uB85C \uC788\uC73C\uBA74 \uC544\uB798 \uC9C1\uC811 \uC9C0\uC815." }),
         provNote,
-        el("label", { class: "field" }, [keyLabel, apiKey]),
+        keyRow,
+        ghBox,
         vertexPicker,
         vertexFile,
         vertexRow,
@@ -20087,6 +20360,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { class: "row" }, [save, cancel, urlToggle])
       ]);
       cancel.addEventListener("click", () => {
+        stopGh?.();
         onClose();
       });
       save.addEventListener("click", async () => {
@@ -20098,8 +20372,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             baseUrl: baseUrl.value,
             note: note.value,
             region: region.value || "global",
-            apiKey: apiKey.value ? apiKey.value : existing ? keepSentinel : ""
+            apiKey: copilot ? ghClaim ? "copilot-device:" + ghClaim : existing ? keepSentinel : "" : apiKey.value ? apiKey.value : existing ? keepSentinel : ""
           }, existing?.id);
+          stopGh?.();
           say(existing ? "\uD0A4\uB97C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC774 \uD0A4\uB97C \uC4F0\uB294 \uD504\uB9AC\uC14B\uC5D0 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4." : "\uD0A4\uB97C \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4. \uC5D0\uC774\uC804\uD2B8 \uD0ED\uC758 \uD504\uB9AC\uC14B\uC5D0\uC11C \uACE0\uB97C \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "ok");
           onClose();
           await draw2();
@@ -20243,7 +20518,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.59"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.60"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -28331,14 +28606,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.59"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.60"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.59", h.version, h.installKind);
+      const behind = backendBehind("0.15.60", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28439,7 +28714,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.59" }),
+        el("span", { class: "dim", text: "v0.15.60" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28801,6 +29076,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.59"} loaded`);
+    console.log(`[risu-hina] v${"0.15.60"} loaded`);
   })();
 })();

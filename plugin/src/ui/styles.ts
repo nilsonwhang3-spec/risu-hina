@@ -923,6 +923,7 @@ label.checkrow input { width: auto; }
 }
 .right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
 .agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.agenthead .autotoggle.on { color: var(--ok, #34d399); border-color: var(--ok, #34d399); font-weight: 700; }
 .agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
 /* The log is the one thing that must never be squeezed out: the plan and the
    proposal tray above and below it shrink and scroll first. */
@@ -1121,6 +1122,9 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 
 .attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
 .chatgptplan { display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 11px; opacity: .8; }
+.copilotusage { flex-wrap: nowrap; min-width: 0; white-space: nowrap; }
+.copilotusage .cpusage { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.copilotusage a { flex-shrink: 0; }
 .attachchip {
   display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
   padding: 2px 4px 2px 8px; border-radius: 5px; font-size: 11.5px;

@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-11-15 (v0.15.59, Risu Hina)
+# 06. Implementation status — as of 2026-11-16 (v0.15.60, Risu Hina)
+
+## 0.15.60 (2026-11-16): §1-131 Manual/Auto 승인 toggle; GitHub Copilot as an API key (device-code login, usage line)
 
 ## 0.15.59 (2026-11-15): §1-130 the lorebook token budget goes up to 999999; saving 메타정보 no longer cuts it to 4096
 
@@ -37,6 +39,59 @@
 ## 0.15.42 (2026-10-12): §1-106 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
+
+## §1-131 (2026-11-16): 자동 승인 및 반영 (per conversation); GitHub Copilot as an API key (device-code login)
+
+- **Request (user):** (1)(2) AI 제안 자동 승인 및 반영 for a conversation; (3) GitHub Copilot as an auth provider with the
+  8-character device code. Mid-task the user asked whether Copilot should sit inside the API key list like Vertex
+  rather than in its own box like the ChatGPT plan - it should, and it was rebuilt that way (see below).
+- **Auto approve (`plugin/src/ui/agent.ts`):** first built as a 고급 설정 switch plus a button beside each 승인; after
+  trying it on the test server the user found that awkward, so the switch and the per-row buttons are gone and the
+  feature is always available as a **Manual 승인 ↔ Auto 승인** toggle in the agent header, right after 실행 모드.
+  Toggling writes a guidance note into the conversation (what Auto does and does not do). The mode is per conversation
+  (localStorage `hina.autoApproveSessions`, last 50 session ids; a new conversation starts Manual). In Auto every
+  proposal of that conversation is approved as it arrives (turn edits via `approveStaged(true)`), and once the turn has
+  ended every scope with unapplied work and no conflict is written to RisuAI (`leaveguard.collect` + `applyOne`, the
+  same path as 상단 반영 → 모두 반영). Not automatic: `studio_batch` (image generation spends Anlas) and scopes with
+  conflicts (noted in the chat). A failed approval stops the pass. Smoke: the toggle follows 실행 모드, Manual first.
+- **Copilot (`pyserver/app/copilotauth.py`, `keys.py`, `providers.py` profile `github-copilot`):** the key form shows
+  "GitHub 로그인 (기기 코드)" instead of the key field when the provider is GitHub Copilot. The backend runs GitHub's
+  OAuth device flow (public client id of GitHub's Copilot editor integration, scope `read:user`), shows the user code
+  and github.com/login/device, polls, and proves Copilot access with one token exchange before reporting done. Saving
+  sends `copilot-device:<state>`; `keys.save` claims the GitHub token there (the panel never holds it) and sets the
+  base URL to the account's Copilot API host (individual/business/enterprise) and the note to the GitHub login.
+  At request time `keys.runtime`/`client_key` swap the GitHub token for the short Copilot token
+  (`copilot_internal/v2/token`, cached, renewed 5 min before expiry) - the Vertex pattern - and `auto_headers` adds
+  the editor headers (`Copilot-Integration-Id: vscode-chat`, `Editor-Version`, ...). The profile sends `max_tokens`,
+  non-strict tools, drops prompt-cache/tier/store fields, and routes codex models to /responses (GPT-5.6+/6 were
+  already routed by `unsupported_for`). The agent client sets `X-Initiator: agent` on tool rounds so only the user's
+  message counts as a user-initiated request. No web search on Copilot. The form warns that using Copilot outside
+  GitHub's editors is a terms grey area.
+- Verified: `tests/test_copilot_key.py` (gate) - token swap and cache/renewal, relay keys untouched, profile/plan,
+  claim-once save with business host, X-Initiator user/agent and editor headers on the wire (mocked); a live
+  `POST github.com/login/device/code` returned an `XXXX-XXXX` code; typecheck and build. Not run: a real Copilot
+  login and chat, the auto-approve flow in a browser.
+- **Staging report (same day):** login and key save worked on the test server; `gemini-3.8-flash` came back 400
+  `model_not_supported`. `/models` with that key showed the model present but `policy.state: disabled` (only
+  gpt-4.1, claude-haiku-4.5, kimi-k3-*, gpt-5.6-luna, gpt-6-luna, mai-code-1.1-flash enabled; `model_picker_enabled`
+  is false on every row, so it cannot be used as a filter). The user then confirmed the cause: the signed-in GitHub
+  account is on Copilot Free, which has no setting to enable those models at all. `providers.hint` now explains
+  `model_not_supported` as a plan limit first (Pro or higher; then enable it at github.com/settings/copilot; use
+  Copilot's id; models that work on Free), and `mai-code` joins the /responses rule.
+- **Quota check (same day, user asked whether tool calls count as premium requests):** `GET
+  api.github.com/copilot_internal/user` with the GitHub token returns `quota_snapshots` (chat / completions /
+  premium_interactions: remaining, entitlement). On the Free account (chat 200, completions 2000, premium 0) three
+  gpt-4.1 calls - a user-initiated tool call, its tool-result follow-up as `X-Initiator: agent`, the same follow-up as
+  `user` - left chat at 200/200 and premium at 0 with fresh snapshot timestamps: gpt-4.1 did not draw on either quota
+  on this account, so the agent/user split could not be told apart by this model. To measure it, repeat with a model
+  that is billed (a premium model on a paid plan).
+- **Copilot usage line:** like "ChatGPT 요금제 사용 중" by the composer, a "GitHub Copilot (Free) · 채팅 n/N · 프리미엄
+  n/N · MM-DD 초기화 · 사용량 관리" line shows while the general agent's key is a Copilot key (`/health` `copilot`,
+  `GET /copilot/usage` -> `copilotauth.usage`, cached 60 s, forced after every turn).
+- **Auto toggle fix (same day):** the header toggle showed its note but never changed: the mode was read back from
+  localStorage only, and inside RisuAI that write can fail silently. It is now held in memory (module-wide) with
+  localStorage as a mirror; on it reads **Auto 모드 On** in green (`.autotoggle.on`). Confirmed by the user on the
+  test server. Smoke clicks it with localStorage writes blocked.
 
 ## §1-130 (2026-11-15): the lorebook token budget goes up to 999999; saving 메타정보 no longer cuts it to 4096
 
