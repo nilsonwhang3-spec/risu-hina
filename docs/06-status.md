@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-11-16 (v0.15.60, Risu Hina)
+# 06. Implementation status — as of 2026-11-17 (v0.15.61, Risu Hina)
+
+## 0.15.61 (2026-11-17): §1-132 the Copilot device code is visible on a phone
 
 ## 0.15.60 (2026-11-16): §1-131 Manual/Auto 승인 toggle; GitHub Copilot as an API key (device-code login, usage line)
 
