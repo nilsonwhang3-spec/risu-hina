@@ -543,13 +543,22 @@ function buildKeysCard(): HTMLElement {
         const copy = el('button', { class: 'ghost tiny', text: '코드 복사' });
         copy.addEventListener('click', () => { copy.textContent = copyToClipboard(r.userCode) ? '복사됨' : '복사 실패'; });
         const wait = el('div', { class: 'hint', text: 'GitHub 승인을 기다리는 중…' });
-        ghOut.appendChild(el('div', { class: 'notice' }, [
-          el('div', {}, [el('a', { href: r.verificationUri, target: '_blank', rel: 'noopener', text: r.verificationUri + ' 열기' })]),
+        // The code first, then the link: on a phone the GitHub page replaces
+        // this screen, so the code has to be read (or copied) before leaving.
+        const notice = el('div', { class: 'notice ghdevice' }, [
           el('div', { class: 'row' }, [code, copy]),
-          el('div', { class: 'hint', text: `위 주소(다른 기기여도 됨)에 코드를 입력하고 승인하세요. ${Math.round(r.expiresIn / 60)}분 안에 해야 합니다.` }),
+          el('div', {}, [el('a', { href: r.verificationUri, target: '_blank', rel: 'noopener', text: r.verificationUri + ' 열기' })]),
+          el('div', { class: 'hint', text: `코드를 복사한 뒤 위 주소(다른 기기여도 됨)에 입력하고 승인하세요. ${Math.round(r.expiresIn / 60)}분 안에 해야 합니다. 승인하고 이 화면으로 돌아오면 자동으로 이어집니다.` }),
           wait,
-        ]));
-        try { window.open(r.verificationUri, '_blank', 'noopener'); } catch { /* the link is there */ }
+        ]);
+        ghOut.appendChild(notice);
+        // A phone-height form put the code below the fold with nothing to say
+        // it had appeared (§1-132).
+        try { notice.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch { /* old engine */ }
+        // Desktop: open GitHub beside the panel. Touch / narrow: never - the
+        // page would cover the code before the user has seen it.
+        const phone = window.matchMedia?.('(max-width: 760px), (pointer: coarse)').matches;
+        if (!phone) { try { window.open(r.verificationUri, '_blank', 'noopener'); } catch { /* the link is there */ } }
         let alive = true;
         stopGh = () => { alive = false; };
         const tick = async (): Promise<void> => {
@@ -616,9 +625,11 @@ function buildKeysCard(): HTMLElement {
       el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
       el('label', { class: 'field' }, [el('span', { text: '프로바이더' }), provider, providerList]),
       el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '이름을 고르면 주소를 압니다. 주소가 따로 있으면 아래 직접 지정.' }),
+      // Copilot's login sits right under the provider: the profile note
+      // below it is long, and on a phone it pushed the code off-screen.
+      ghBox,
       provNote,
       keyRow,
-      ghBox,
       vertexPicker, vertexFile, vertexRow,
       el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),
       urlRow,

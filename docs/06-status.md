@@ -40,6 +40,16 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-132 (2026-11-17): the Copilot device code is visible on a phone
+
+- **Report:** after 0.15.60, the Copilot login screen was hard to see on mobile.
+- **Cause (measured, harness 360x600 + headless Chrome):** the login button sat below the long provider note, so the
+  code appeared at y=679 in a 600px frame with nothing scrolling to it; and `window.open` sent the phone to GitHub
+  before the code was ever on screen.
+- **Fix (`plugin/src/ui/tab-settings.ts`, plugin only):** the GitHub login box comes right under 프로바이더 (above the
+  provider note); the notice shows the code + 코드 복사 first, then the link; it scrolls itself to centre; GitHub is
+  opened automatically only on a wide, fine-pointer screen. Measured after: code at y=266 of 600.
+
 ## §1-131 (2026-11-16): 자동 승인 및 반영 (per conversation); GitHub Copilot as an API key (device-code login)
 
 - **Request (user):** (1)(2) AI 제안 자동 승인 및 반영 for a conversation; (3) GitHub Copilot as an auth provider with the
